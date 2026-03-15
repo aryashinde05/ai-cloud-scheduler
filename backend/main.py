@@ -30,6 +30,7 @@ from app.api.cloud_endpoints import cloud_router
 from app.api.health_endpoints import router as health_router
 from app.api.ai_assistant_endpoints import router as ai_assistant_router
 from app.api.aws_cost_endpoints import router as aws_cost_router
+from app.api.azure_cost_router import router as azure_cost_router
 from app.api.aws_cost_alerts_endpoints import router as aws_cost_alerts_router
 from app.api.webhook_endpoints import router as webhook_router
 from app.api.automation_endpoints import router as automation_router
@@ -223,6 +224,7 @@ app.include_router(cloud_router, prefix="/api/v1")
 app.include_router(health_router)
 app.include_router(ai_assistant_router, prefix="/api/v1")
 app.include_router(aws_cost_router)
+app.include_router(azure_cost_router)
 app.include_router(aws_cost_alerts_router)
 app.include_router(webhook_router, prefix="/api/v1")
 app.include_router(automation_router)

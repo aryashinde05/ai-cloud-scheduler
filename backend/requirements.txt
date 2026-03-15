@@ -33,6 +33,10 @@ prometheus-client
 # Cloud Provider SDKs
 boto3
 botocore
+azure-identity
+azure-mgmt-costmanagement
+azure-mgmt-consumption
+azure-mgmt-advisor
 
 # AI & Machine Learning
 openai
