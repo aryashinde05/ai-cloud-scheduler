@@ -276,8 +276,8 @@ async def _update_aws_pricing_async(regions: Optional[List[str]] = None) -> Dict
             'ap-southeast-1', 'ap-southeast-2', 'ap-northeast-1'
         ]
     
-    async with get_async_db_session() as session:
-        repository = MultiCloudRepository(session)
+    async with get_async_db_session() as Client:
+        repository = MultiCloudRepository(Client)
         validator = PricingDataValidator()
         
         updated_count = 0
@@ -361,8 +361,8 @@ async def _update_gcp_pricing_async(regions: Optional[List[str]] = None) -> Dict
             'asia-southeast1', 'asia-northeast1', 'asia-east1'
         ]
     
-    async with get_async_db_session() as session:
-        repository = MultiCloudRepository(session)
+    async with get_async_db_session() as Client:
+        repository = MultiCloudRepository(Client)
         validator = PricingDataValidator()
         
         updated_count = 0
@@ -446,8 +446,8 @@ async def _update_azure_pricing_async(regions: Optional[List[str]] = None) -> Di
             'Southeast Asia', 'East Asia', 'Japan East'
         ]
     
-    async with get_async_db_session() as session:
-        repository = MultiCloudRepository(session)
+    async with get_async_db_session() as Client:
+        repository = MultiCloudRepository(Client)
         validator = PricingDataValidator()
         
         updated_count = 0
@@ -523,8 +523,8 @@ async def _update_azure_pricing_async(regions: Optional[List[str]] = None) -> Di
 async def _detect_pricing_changes_async(threshold_percentage: float) -> Dict[str, Any]:
     """Async implementation of pricing change detection"""
     
-    async with get_async_db_session() as session:
-        repository = MultiCloudRepository(session)
+    async with get_async_db_session() as Client:
+        repository = MultiCloudRepository(Client)
         notification_service = NotificationService()
         
         changes_detected = []
@@ -614,8 +614,8 @@ async def _detect_pricing_changes_async(threshold_percentage: float) -> Dict[str
 async def _validate_pricing_data_async(provider: Optional[str] = None) -> Dict[str, Any]:
     """Async implementation of pricing data validation"""
     
-    async with get_async_db_session() as session:
-        repository = MultiCloudRepository(session)
+    async with get_async_db_session() as Client:
+        repository = MultiCloudRepository(Client)
         validator = PricingDataValidator()
         
         validation_results = {
@@ -695,3 +695,4 @@ async def _validate_pricing_data_async(provider: Optional[str] = None) -> Dict[s
                 })
         
         return validation_results
+

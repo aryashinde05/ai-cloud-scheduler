@@ -254,18 +254,22 @@ class OptimizationRecommendation(BaseModel):
     """Stores AI-generated optimization recommendations"""
     __tablename__ = "optimization_recommendations"
 
-    id = Column(Integer, primary_key=True, index=True)
-    resource_id = Column(String, index=True, nullable=False) 
-    resource_type = Column(String, nullable=False) # 'EC2', 'EBS', 'RDS', etc.
-    recommendation_type = Column(String, nullable=False) # 'Rightsizing', 'Idle', 'Reserved Instance'
-    description = Column(String, nullable=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    provider_id = Column(UUID(as_uuid=True), ForeignKey("cloud_providers.id"), nullable=True)
+    resource_id = Column(String(255), index=True, nullable=False) 
+    resource_type = Column(String(100), nullable=False) # 'EC2', 'EBS', 'RDS', etc.
+    recommendation_type = Column(String(100), nullable=False) # 'Rightsizing', 'Idle', 'Reserved Instance'
+    description = Column(String(500), nullable=True)
     current_cost = Column(Float, nullable=True)
     projected_cost = Column(Float, nullable=True)
     potential_savings = Column(Float, nullable=False)
     confidence_score = Column(Float, nullable=True)
-    status = Column(String, default="pending") # pending, applied, rejected
+    status = Column(String(50), default="pending") # pending, applied, rejected
     generated_at = Column(DateTime, default=datetime.utcnow)
     applied_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    provider = relationship("CloudProvider", back_populates="optimization_recommendations")
     
     # Optional foreign key for structured relationships
     ec2_instance_id = Column(Integer, ForeignKey("ec2_instances.id"), nullable=True)

@@ -9,9 +9,9 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, Field, EmailStr
-from sqlalchemy.orm import Session
+from supabase import Client
 
-from app.database.database import get_db_session
+from app.database.database import get_supabase
 from app.core.auth import get_current_user
 from app.services.startup_migration.models import User
 from app.aws.aws_cost_monitor import AWSCostMonitor, BudgetThreshold, CostAlert
@@ -148,7 +148,7 @@ async def setup_cost_monitoring(
     config: MonitoringConfigRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Set up comprehensive cost monitoring with budget thresholds and notifications.

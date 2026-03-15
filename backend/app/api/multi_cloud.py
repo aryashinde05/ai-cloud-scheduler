@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
-from app.database.database import get_async_db_session
+from app.database.database import get_supabase
 from app.core.auth import get_current_user
 from app.services.startup_migration.models import User
 from app.services.multi_cloud_repository import MultiCloudRepository
@@ -38,7 +38,7 @@ router = APIRouter(prefix="/multi-cloud", tags=["Multi-Cloud Cost Comparison"])
 
 # Dependency to get repository
 async def get_multi_cloud_repository(
-    session: AsyncSession = Depends(get_async_db_session)
+    session: AsyncSession = Depends(get_supabase)
 ) -> MultiCloudRepository:
     """Get multi-cloud repository instance"""
     return MultiCloudRepository(session)

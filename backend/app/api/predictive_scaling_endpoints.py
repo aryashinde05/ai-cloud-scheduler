@@ -17,9 +17,9 @@ from uuid import UUID
 import pandas as pd
 from fastapi import APIRouter, HTTPException, Depends, Query, Body
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from supabase import Client
 
-from app.database.database import get_db_session
+from app.database.database import get_supabase
 from app.services.predictive_scaling_engine import (
     PredictiveScalingEngine, DemandForecast, ScalingRecommendation, 
     ScalingResult, ForecastHorizon, ScalingActionType
@@ -132,7 +132,7 @@ def get_scaling_engine() -> PredictiveScalingEngine:
 async def initialize_resource_monitoring(
     request: ResourceInitializationRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Initialize predictive scaling for a resource"""
     
@@ -181,7 +181,7 @@ async def initialize_resource_monitoring(
 async def generate_demand_forecast(
     request: ForecastRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Generate demand forecast for a resource"""
     
@@ -248,7 +248,7 @@ async def generate_demand_forecast(
 async def get_scaling_recommendation(
     request: ScalingRecommendationRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Get scaling recommendation based on demand forecast"""
     
@@ -305,7 +305,7 @@ async def get_scaling_recommendation(
 async def execute_scaling_action(
     request: ExecuteScalingRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Execute a scaling action"""
     
@@ -368,7 +368,7 @@ async def execute_scaling_action(
 async def optimize_multi_resource_allocation(
     request: MultiResourceOptimizationRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Optimize allocation across multiple resources and providers"""
     
@@ -412,7 +412,7 @@ async def optimize_multi_resource_allocation(
 async def get_resource_status(
     resource_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Get predictive scaling status for a resource"""
     
@@ -507,3 +507,4 @@ async def _record_scaling_event(result: ScalingResult, db: Session):
     except Exception as e:
         logger.error(f"Error recording scaling event: {str(e)}")
         db.rollback()
+

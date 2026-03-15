@@ -16,8 +16,8 @@ from core.celery_config import celery_app
 
 if __name__ == '__main__':
     # Set environment variables if not already set
-    os.environ.setdefault('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-    os.environ.setdefault('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+    os.environ.setdefault('CELERY_BROKER_URL', 'memory://')
+    os.environ.setdefault('CELERY_RESULT_BACKEND', 'cache+memory://')
     
     # Start the worker
     celery_app.worker_main([

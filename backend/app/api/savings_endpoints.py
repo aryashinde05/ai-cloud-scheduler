@@ -11,9 +11,9 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from supabase import Client
 
-from app.database.database import get_db
+from app.database.database import get_supabase
 from app.services.savings_calculator import SavingsCalculator, SavingsReport, SavingsMetrics
 from app.models.automation_models import OptimizationAction, ActionStatus
 from app.core.auth import get_current_user
@@ -73,6 +73,7 @@ class HistoricalSummaryResponse(BaseModel):
     total_rollback_impact: float
 
 
-def get_savings_calculator(db: Session = Depends(get_db)) -> SavingsCalculator:
+def get_savings_calculator(db: Client = Depends(get_supabase)) -> SavingsCalculator:
     """Dependency to get SavingsCalculator instance"""
     return SavingsCalculator(db)
+

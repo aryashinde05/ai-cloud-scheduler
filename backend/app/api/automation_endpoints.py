@@ -15,9 +15,9 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Query
 from pydantic import BaseModel, Field, validator
-from sqlalchemy.orm import Session
+from supabase import Client
 
-from app.database.database import get_db_session
+from app.database.database import get_supabase
 from app.core.auth import get_current_user, get_current_active_user
 from app.services.startup_migration.models import User
 from app.models.automation_models import (
@@ -140,7 +140,7 @@ def get_action_engine() -> ActionEngine:
     """Get ActionEngine instance"""
     return ActionEngine()
 
-def get_savings_calculator(db: Session) -> SavingsCalculator:
+def get_savings_calculator(db: Client) -> SavingsCalculator:
     """Get SavingsCalculator instance"""
     return SavingsCalculator(db)
 
@@ -158,7 +158,7 @@ def get_rollback_manager() -> RollbackManager:
 async def create_automation_policy(
     policy_request: AutomationPolicyRequest,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Create a new automation policy.
@@ -217,7 +217,7 @@ async def create_automation_policy(
 async def list_automation_policies(
     active_only: bool = Query(default=True, description="Return only active policies"),
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     List all automation policies.
@@ -261,7 +261,7 @@ async def list_automation_policies(
 async def get_automation_policy(
     policy_id: str,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Get a specific automation policy by ID.
@@ -307,7 +307,7 @@ async def update_automation_policy(
     policy_id: str,
     policy_updates: Dict[str, Any],
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Update an existing automation policy.
@@ -367,7 +367,7 @@ async def update_automation_policy(
 async def delete_automation_policy(
     policy_id: str,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Deactivate an automation policy.
@@ -409,7 +409,7 @@ async def list_optimization_actions(
     limit: int = Query(default=100, le=1000, description="Maximum number of actions to return"),
     offset: int = Query(default=0, ge=0, description="Number of actions to skip"),
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     List optimization actions with optional filtering.
@@ -475,7 +475,7 @@ async def list_optimization_actions(
 async def get_optimization_action(
     action_id: str,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Get a specific optimization action by ID.
@@ -527,7 +527,7 @@ async def execute_optimization_actions(
     execution_request: ActionExecutionRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Execute optimization actions immediately or with emergency override.
@@ -623,7 +623,7 @@ async def execute_optimization_actions(
 async def rollback_optimization_action(
     action_id: str,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Rollback a completed optimization action.
@@ -681,7 +681,7 @@ async def rollback_optimization_action(
 @router.get("/approvals", response_model=List[Dict[str, Any]])
 async def list_pending_approvals(
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     List pending approval requests.
@@ -726,7 +726,7 @@ async def process_approval_decision(
     approval_id: str,
     decision: ApprovalDecisionRequest,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Approve or reject an optimization action.
@@ -773,7 +773,7 @@ async def process_approval_decision(
 async def simulate_automation_actions(
     dry_run_request: DryRunRequest,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Simulate automation actions without executing them.
@@ -824,7 +824,7 @@ async def simulate_automation_actions(
 async def generate_savings_report(
     report_request: SavingsReportRequest,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Generate comprehensive savings report.
@@ -892,7 +892,7 @@ async def generate_savings_report(
 async def get_savings_trends(
     months_back: int = Query(default=12, ge=1, le=24, description="Number of months to include"),
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Get monthly savings trends over time.
@@ -920,7 +920,7 @@ async def get_savings_trends(
 @router.get("/reports/summary")
 async def get_historical_savings_summary(
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Get comprehensive historical savings summary.
@@ -955,7 +955,7 @@ async def get_automation_audit_logs(
     limit: int = Query(default=100, le=1000, description="Maximum number of logs to return"),
     offset: int = Query(default=0, ge=0, description="Number of logs to skip"),
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Get automation audit logs with filtering options.
@@ -1025,7 +1025,7 @@ async def get_automation_audit_logs(
 async def create_emergency_override(
     override_request: EmergencyOverrideRequest,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Create emergency override for immediate action execution.
@@ -1121,7 +1121,7 @@ async def automation_health_check():
 @router.get("/status")
 async def automation_system_status(
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Get current automation system status and statistics.

@@ -246,13 +246,13 @@ async def get_current_user(
         # Return a demo user with correct fields and proper UUID
         from uuid import UUID
         demo_user = User(
-            id=UUID("00000000-0000-0000-0000-000000000000"),
-            email="demo@example.com",
-            password_hash="demo_hash",
-            first_name="Demo",
-            last_name="User",
-            role=UserRole.ADMIN,
-            is_active=True
+            # id=UUID("00000000-0000-0000-0000-000000000000"),
+            # email="demo@example.com",
+            # password_hash="demo_hash",
+            # first_name="Demo",
+            # last_name="User",
+            # role=UserRole.ADMIN,
+            # is_active=True
         )
         return demo_user
     

@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field, validator
-from sqlalchemy.orm import Session
+from supabase import Client
 
 from app.core.auth import (
     auth_service, AuthenticationService, TokenResponse, 
@@ -16,7 +16,7 @@ from app.core.auth import (
 )
 from app.models.models import User, UserRole
 from app.services.repositories import UserRepository, AuditLogRepository
-from app.database.database import get_db_session
+from app.database.database import get_supabase
 
 # Create router
 auth_router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -115,7 +115,7 @@ def get_user_agent(request: Request) -> str:
 async def register_user(
     user_data: UserRegistrationRequest,
     request: Request,
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Register a new user"""
     user_repo = UserRepository(db)
@@ -168,7 +168,7 @@ async def register_user(
 async def login_user(
     login_data: UserLoginRequest,
     request: Request,
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Authenticate user and return tokens"""
     user_repo = UserRepository(db)
@@ -227,7 +227,7 @@ async def login_user(
 async def refresh_token(
     refresh_data: RefreshTokenRequest,
     request: Request,
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Refresh access token using refresh token"""
     audit_repo = AuditLogRepository(db)
@@ -274,7 +274,7 @@ async def logout_user(
     request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(security),
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Logout user and revoke token"""
     audit_repo = AuditLogRepository(db)
@@ -314,7 +314,7 @@ async def update_current_user(
     user_update: dict,
     request: Request,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Update current user information"""
     user_repo = UserRepository(db)
@@ -364,7 +364,7 @@ async def change_password(
     password_data: PasswordChangeRequest,
     request: Request,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Change user password"""
     user_repo = UserRepository(db)
@@ -434,7 +434,7 @@ async def list_users(
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """List all users (admin only)"""
     if current_user.role != UserRole.ADMIN:
@@ -454,7 +454,7 @@ async def update_user_role(
     new_role: UserRole,
     request: Request,
     current_user: User = Depends(get_current_active_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Update user role (admin only)"""
     if current_user.role != UserRole.ADMIN:

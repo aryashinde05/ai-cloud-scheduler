@@ -322,8 +322,8 @@
   },
   
   "celery": {
-    "broker_url": "redis://:redis_password@redis:6379/0",
-    "result_backend": "redis://:redis_password@redis:6379/0",
+    "broker_url": "memory://",
+    "result_backend": "cache+memory://",
     "task_schedules": {
       "sync_cost_data": {
         "schedule": "0 */6 * * *",

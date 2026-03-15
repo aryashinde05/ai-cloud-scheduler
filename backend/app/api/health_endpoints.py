@@ -14,7 +14,6 @@ import psutil
 import structlog
 from datetime import datetime, timedelta
 from app.database.database import database_health_check
-from app.core.redis_config import redis_manager
 from app.utils.performance_monitor import performance_monitor
 
 logger = structlog.get_logger(__name__)
@@ -38,17 +37,15 @@ async def readiness_probe() -> Dict[str, Any]:
     try:
         # Check critical dependencies
         db_health = await database_health_check()
-        redis_health = await redis_manager.health_check()
         
-        if db_health["status"] != "healthy" or redis_health["status"] != "healthy":
+        if db_health["status"] != "healthy":
             raise HTTPException(status_code=503, detail="Service not ready")
         
         return {
             "status": "ready",
             "timestamp": datetime.utcnow().isoformat(),
             "checks": {
-                "database": db_health["status"],
-                "redis": redis_health["status"]
+                "database": db_health["status"]
             }
         }
     except Exception as e:
@@ -90,21 +87,18 @@ async def detailed_health_check() -> Dict[str, Any]:
         
         # Run all health checks concurrently
         db_task = asyncio.create_task(database_health_check())
-        redis_task = asyncio.create_task(redis_manager.health_check())
         system_task = asyncio.create_task(get_system_metrics())
         performance_task = asyncio.create_task(get_performance_health())
         
         # Wait for all checks to complete
-        db_health, redis_health, system_metrics, performance_health = await asyncio.gather(
-            db_task, redis_task, system_task, performance_task,
+        db_health, system_metrics, performance_health = await asyncio.gather(
+            db_task, system_task, performance_task,
             return_exceptions=True
         )
         
         # Handle exceptions
         if isinstance(db_health, Exception):
             db_health = {"status": "unhealthy", "error": str(db_health)}
-        if isinstance(redis_health, Exception):
-            redis_health = {"status": "unhealthy", "error": str(redis_health)}
         if isinstance(system_metrics, Exception):
             system_metrics = {"status": "unhealthy", "error": str(system_metrics)}
         if isinstance(performance_health, Exception):
@@ -112,7 +106,7 @@ async def detailed_health_check() -> Dict[str, Any]:
         
         # Determine overall health
         overall_status = "healthy"
-        critical_components = [db_health, redis_health]
+        critical_components = [db_health]
         
         for component in critical_components:
             if component.get("status") != "healthy":
@@ -135,7 +129,6 @@ async def detailed_health_check() -> Dict[str, Any]:
             "environment": "production",
             "components": {
                 "database": db_health,
-                "redis": redis_health,
                 "system": system_metrics,
                 "performance": performance_health
             },

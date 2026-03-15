@@ -9,9 +9,9 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from supabase import Client
 
-from app.database.database import get_db_session
+from app.database.database import get_supabase
 from app.core.auth import get_current_user
 from app.services.startup_migration.models import User
 from app.aws.aws_cost_analyzer import AWSCostAnalyzer, CostAnalysisReport
@@ -132,7 +132,7 @@ async def analyze_aws_costs(
     request: CostAnalysisRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Perform comprehensive AWS cost analysis and optimization recommendations.
@@ -378,7 +378,7 @@ async def get_quick_wins(
 
 # Background task functions
 
-async def _store_analysis_results(user_id: int, analysis_data: Dict[str, Any], db: Session):
+async def _store_analysis_results(user_id: int, analysis_data: Dict[str, Any], db: Client):
     """Store analysis results for historical tracking"""
     try:
         # In a real implementation, you would store this in a database table
@@ -412,3 +412,4 @@ async def health_check():
             "service_breakdown"
         ]
     }
+

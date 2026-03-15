@@ -50,10 +50,10 @@ class StartupMigrationProject(Base):
     status = Column(SQLEnum(ProjectStatus), nullable=False, default=ProjectStatus.ASSESSMENT)
     
     # Relationships
-    assessment = relationship("DatabaseAssessment", back_populates="project", uselist=False)
-    recommendations = relationship("CloudRecommendation", back_populates="project")
-    migration_plan = relationship("MigrationPlan", back_populates="project", uselist=False)
-    finops_integration = relationship("FinOpsIntegration", back_populates="project", uselist=False)
+    assessment = relationship("StartupDatabaseAssessment", back_populates="project", uselist=False)
+    recommendations = relationship("StartupCloudRecommendation", back_populates="project")
+    migration_plan = relationship("StartupMigrationPlan", back_populates="project", uselist=False)
+    finops_integration = relationship("StartupFinOpsIntegration", back_populates="project", uselist=False)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

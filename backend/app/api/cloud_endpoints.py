@@ -10,12 +10,12 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, Field, validator
-from sqlalchemy.orm import Session
+from supabase import Client
 
 from app.core.auth import get_current_active_user, require_permission
 from app.services.startup_migration.models import User, CloudProvider, ProviderType, CostData
 from app.services.repositories import CloudProviderRepository, CostDataRepository, AuditLogRepository
-from app.database.database import get_db_session
+from app.database.database import get_supabase
 from app.services.cloud_providers import CloudProviderService, AWSCredentials
 from app.utils.encryption import encryption_service
 
@@ -110,7 +110,7 @@ async def register_cloud_provider(
     provider_data: CloudProviderRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(require_permission("cloud_providers", "write")),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Register a new cloud provider for enterprise cost management"""
     provider_repo = CloudProviderRepository(db)
@@ -186,7 +186,7 @@ async def register_cloud_provider(
 @cloud_router.get("/", response_model=List[CloudProviderResponse])
 async def list_cloud_providers(
     current_user: User = Depends(require_permission("cloud_providers", "read")),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """List all registered cloud providers"""
     provider_repo = CloudProviderRepository(db)
@@ -229,7 +229,7 @@ async def list_cloud_providers(
 async def get_cloud_provider(
     provider_id: UUID,
     current_user: User = Depends(require_permission("cloud_providers", "read")),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Get detailed information about a cloud provider"""
     provider_repo = CloudProviderRepository(db)
@@ -264,7 +264,7 @@ async def get_cloud_provider(
 async def get_provider_accounts(
     provider_id: UUID,
     current_user: User = Depends(require_permission("cloud_providers", "read")),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Get all AWS accounts accessible through this provider"""
     provider_repo = CloudProviderRepository(db)
@@ -303,7 +303,7 @@ async def sync_cost_data(
     sync_request: SyncRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(require_permission("costs", "write")),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Sync cost data from cloud provider"""
     provider_repo = CloudProviderRepository(db)
@@ -361,7 +361,7 @@ async def get_cost_summary(
     start_date: date,
     end_date: date,
     current_user: User = Depends(require_permission("costs", "read")),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Get comprehensive cost summary for enterprise reporting"""
     cost_repo = CostDataRepository(db)
@@ -401,7 +401,7 @@ async def get_cost_summary(
 async def delete_cloud_provider(
     provider_id: UUID,
     current_user: User = Depends(require_permission("cloud_providers", "delete")),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Delete a cloud provider (admin only)"""
     provider_repo = CloudProviderRepository(db)

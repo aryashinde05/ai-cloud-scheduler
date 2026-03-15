@@ -2,7 +2,7 @@ import pytest
 import uuid
 from httpx import AsyncClient
 from unittest.mock import AsyncMock, patch
-from sqlalchemy.orm import Session
+from supabase import Client
 
 from main import app
 from app.database.database import get_db
@@ -14,11 +14,11 @@ def anyio_backend():
 # --- Mock Database ---
 async def override_get_db():
     try:
-        session = AsyncMock(spec=Session)  
+        Client = AsyncMock(spec=Client)  
         # Implement minimal async methods if needed, mostly AsyncMock does magic
-        session.commit = AsyncMock()
-        session.rollback = AsyncMock()
-        yield session
+        Client.commit = AsyncMock()
+        Client.rollback = AsyncMock()
+        yield Client
     finally:
         pass
 
@@ -51,7 +51,7 @@ async def test_get_forecast():
 
 @pytest.mark.asyncio
 async def test_get_ec2_resources():
-    # Mock database session execute result
+    # Mock database Client execute result
     mock_result = AsyncMock()
     mock_result.scalars().all.return_value = [
         {"id": "i-123", "region": "us-east-1", "state": "running"}
@@ -60,8 +60,9 @@ async def test_get_ec2_resources():
     # We need a more complex override if we want query results from DB mock
     # For now, just checking the endpoint is reachable and handles responses
     async with AsyncClient(app=app, base_url="http://test") as ac:
-        # Patch the session.execute within the dependency override if possible or mock the whole dependency
+        # Patch the Client.execute within the dependency override if possible or mock the whole dependency
         # For this example, we accept empty list or whatever default behavior of AsyncMock
         response = await ac.get("/api/v1/resources/ec2")
         assert response.status_code == 200
         assert isinstance(response.json(), list)
+

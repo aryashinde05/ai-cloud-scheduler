@@ -8,10 +8,7 @@ from uuid import UUID
 from datetime import datetime, date
 from decimal import Decimal
 
-from sqlalchemy import and_, or_, desc, asc, func, select, update, delete
-from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.exc import IntegrityError, NoResultFound
+from supabase import Client
 
 from app.services.startup_migration.models import (
     BaseModel, User, CloudProvider, CostData, Budget, BudgetAlert,
@@ -22,30 +19,28 @@ from app.services.startup_migration.models import (
 T = TypeVar('T', bound=BaseModel)
 
 class BaseRepository(Generic[T], ABC):
-    """Base repository with common CRUD operations"""
+    """Base repository with common CRUD operations using Supabase"""
     
-    def __init__(self, session: Session, model_class: Type[T]):
-        self.session = session
+    def __init__(self, client: Client, model_class: Type[T]):
+        self.client = client
         self.model_class = model_class
+        self.table_name = model_class.__tablename__
     
-    async def create(self, **kwargs) -> T:
+    async def create(self, **kwargs) -> Dict[str, Any]:
         """Create a new entity"""
         try:
-            entity = self.model_class(**kwargs)
-            self.session.add(entity)
-            await self.session.flush()
-            return entity
-        except IntegrityError as e:
-            await self.session.rollback()
+            response = self.client.table(self.table_name).insert(kwargs).execute()
+            if not response.data:
+                raise ValueError(f"Failed to create {self.model_class.__name__}")
+            return response.data[0]
+        except Exception as e:
             raise ValueError(f"Failed to create {self.model_class.__name__}: {str(e)}")
     
-    async def get_by_id(self, id: UUID) -> Optional[T]:
+    async def get_by_id(self, id: UUID) -> Optional[Dict[str, Any]]:
         """Get entity by ID"""
         try:
-            result = await self.session.execute(
-                select(self.model_class).where(self.model_class.id == id)
-            )
-            return result.scalar_one_or_none()
+            response = self.client.table(self.table_name).select("*").eq("id", str(id)).execute()
+            return response.data[0] if response.data else None
         except Exception as e:
             raise ValueError(f"Failed to get {self.model_class.__name__} by ID: {str(e)}")
     
@@ -53,43 +48,34 @@ class BaseRepository(Generic[T], ABC):
                      filters: Optional[Dict[str, Any]] = None,
                      limit: int = 100,
                      offset: int = 0,
-                     order_by: Optional[str] = None) -> List[T]:
+                     order_by: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get all entities with optional filtering"""
         try:
-            query = select(self.model_class)
+            query = self.client.table(self.table_name).select("*")
             
             # Apply filters
             if filters:
-                conditions = []
                 for key, value in filters.items():
-                    if hasattr(self.model_class, key):
-                        attr = getattr(self.model_class, key)
-                        if isinstance(value, list):
-                            conditions.append(attr.in_(value))
-                        else:
-                            conditions.append(attr == value)
-                if conditions:
-                    query = query.where(and_(*conditions))
+                    if isinstance(value, list):
+                        query = query.in_(key, value)
+                    else:
+                        query = query.eq(key, value)
             
             # Apply ordering
             if order_by:
-                if order_by.startswith('-'):
-                    attr_name = order_by[1:]
-                    if hasattr(self.model_class, attr_name):
-                        query = query.order_by(desc(getattr(self.model_class, attr_name)))
-                else:
-                    if hasattr(self.model_class, order_by):
-                        query = query.order_by(asc(getattr(self.model_class, order_by)))
+                descending = order_by.startswith('-')
+                column = order_by[1:] if descending else order_by
+                query = query.order(column, desc=descending)
             
             # Apply pagination
-            query = query.offset(offset).limit(limit)
+            query = query.range(offset, offset + limit - 1)
             
-            result = await self.session.execute(query)
-            return result.scalars().all()
+            response = query.execute()
+            return response.data
         except Exception as e:
             raise ValueError(f"Failed to get {self.model_class.__name__} entities: {str(e)}")
     
-    async def update(self, id: UUID, **kwargs) -> Optional[T]:
+    async def update(self, id: UUID, **kwargs) -> Optional[Dict[str, Any]]:
         """Update entity by ID"""
         try:
             # Remove None values and non-updatable fields
@@ -100,102 +86,83 @@ class BaseRepository(Generic[T], ABC):
                 return await self.get_by_id(id)
             
             # Add updated_at timestamp
-            update_data['updated_at'] = datetime.utcnow()
+            update_data['updated_at'] = datetime.utcnow().isoformat()
             
-            await self.session.execute(
-                update(self.model_class)
-                .where(self.model_class.id == id)
-                .values(**update_data)
-            )
-            
-            return await self.get_by_id(id)
+            response = self.client.table(self.table_name).update(update_data).eq("id", str(id)).execute()
+            return response.data[0] if response.data else None
         except Exception as e:
-            await self.session.rollback()
             raise ValueError(f"Failed to update {self.model_class.__name__}: {str(e)}")
     
     async def delete(self, id: UUID) -> bool:
         """Delete entity by ID"""
         try:
-            result = await self.session.execute(
-                delete(self.model_class).where(self.model_class.id == id)
-            )
-            return result.rowcount > 0
+            response = self.client.table(self.table_name).delete().eq("id", str(id)).execute()
+            return len(response.data) > 0
         except Exception as e:
-            await self.session.rollback()
             raise ValueError(f"Failed to delete {self.model_class.__name__}: {str(e)}")
     
-    async def bulk_create(self, items: List[Dict[str, Any]]) -> List[T]:
+    async def bulk_create(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Bulk create entities"""
         try:
-            entities = [self.model_class(**item) for item in items]
-            self.session.add_all(entities)
-            await self.session.flush()
-            return entities
-        except IntegrityError as e:
-            await self.session.rollback()
+            response = self.client.table(self.table_name).insert(items).execute()
+            return response.data
+        except Exception as e:
             raise ValueError(f"Failed to bulk create {self.model_class.__name__}: {str(e)}")
     
     async def count(self, filters: Optional[Dict[str, Any]] = None) -> int:
         """Count entities with optional filtering"""
         try:
-            query = select(func.count(self.model_class.id))
+            query = self.client.table(self.table_name).select("*", count="exact")
             
             if filters:
-                conditions = []
                 for key, value in filters.items():
-                    if hasattr(self.model_class, key):
-                        attr = getattr(self.model_class, key)
-                        if isinstance(value, list):
-                            conditions.append(attr.in_(value))
-                        else:
-                            conditions.append(attr == value)
-                if conditions:
-                    query = query.where(and_(*conditions))
+                    if isinstance(value, list):
+                        query = query.in_(key, value)
+                    else:
+                        query = query.eq(key, value)
             
-            result = await self.session.execute(query)
-            return result.scalar()
+            response = query.limit(1).execute()
+            return response.count if response.count is not None else 0
         except Exception as e:
             raise ValueError(f"Failed to count {self.model_class.__name__} entities: {str(e)}")
 
 class UserRepository(BaseRepository[User]):
-    """Repository for User entities"""
+    """Repository for User entities using Supabase"""
     
-    def __init__(self, session: Session):
-        super().__init__(session, User)
+    def __init__(self, client: Client):
+        super().__init__(client, User)
     
-    async def get_by_email(self, email: str) -> Optional[User]:
+    async def get_by_email(self, email: str) -> Optional[Dict[str, Any]]:
         """Get user by email address"""
         try:
-            result = await self.session.execute(
-                select(User).where(User.email == email.lower())
-            )
-            return result.scalar_one_or_none()
+            response = self.client.table(self.table_name).select("*").eq("email", email.lower()).execute()
+            return response.data[0] if response.data else None
         except Exception as e:
             raise ValueError(f"Failed to get user by email: {str(e)}")
     
-    async def get_active_users(self) -> List[User]:
+    async def get_active_users(self) -> List[Dict[str, Any]]:
         """Get all active users"""
         return await self.get_all(filters={'is_active': True})
     
-    async def get_users_by_role(self, role: UserRole) -> List[User]:
+    async def get_users_by_role(self, role: UserRole) -> List[Dict[str, Any]]:
         """Get users by role"""
         return await self.get_all(filters={'role': role, 'is_active': True})
     
     async def update_last_login(self, user_id: UUID) -> None:
         """Update user's last login timestamp"""
-        await self.update(user_id, last_login=datetime.utcnow())
+        await self.update(user_id, last_login=datetime.utcnow().isoformat())
 
 class CloudProviderRepository(BaseRepository[CloudProvider]):
-    """Repository for CloudProvider entities"""
+    """Repository for CloudProvider entities using Supabase"""
     
-    def __init__(self, session: Session):
-        super().__init__(session, CloudProvider)
+    def __init__(self, client: Client):
+        super().__init__(client, CloudProvider)
     
-    async def get_active_providers(self) -> List[CloudProvider]:
+    async def get_active_providers(self) -> List[Dict[str, Any]]:
         """Get all active cloud providers"""
         return await self.get_all(filters={'is_active': True})
     
-    async def get_by_type(self, provider_type: ProviderType) -> List[CloudProvider]:
+    async def get_by_type(self, provider_type: ProviderType) -> List[Dict[str, Any]]:
         """Get providers by type"""
         return await self.get_all(filters={'provider_type': provider_type, 'is_active': True})
     
@@ -210,8 +177,8 @@ class CloudProviderRepository(BaseRepository[CloudProvider]):
 class CostDataRepository(BaseRepository[CostData]):
     """Repository for CostData entities with time-series optimizations"""
     
-    def __init__(self, session: Session):
-        super().__init__(session, CostData)
+    def __init__(self, Client: Client):
+        super().__init__(Client, CostData)
     
     async def get_cost_data_by_date_range(self, 
                                          provider_id: UUID,
@@ -233,7 +200,7 @@ class CostDataRepository(BaseRepository[CostData]):
             
             query = query.order_by(CostData.cost_date.desc())
             
-            result = await self.session.execute(query)
+            result = await self.Client.execute(query)
             return result.scalars().all()
         except Exception as e:
             raise ValueError(f"Failed to get cost data by date range: {str(e)}")
@@ -256,7 +223,7 @@ class CostDataRepository(BaseRepository[CostData]):
                 )
             ).group_by(CostData.service_name).order_by(desc('total_cost'))
             
-            result = await self.session.execute(query)
+            result = await self.Client.execute(query)
             return [
                 {
                     'service_name': row.service_name,
@@ -285,7 +252,7 @@ class CostDataRepository(BaseRepository[CostData]):
                 )
             )
             
-            result = await self.session.execute(query)
+            result = await self.Client.execute(query)
             cost_data = result.scalars().all()
             
             # Group by tag value
@@ -312,8 +279,8 @@ class CostDataRepository(BaseRepository[CostData]):
 class BudgetRepository(BaseRepository[Budget]):
     """Repository for Budget entities"""
     
-    def __init__(self, session: Session):
-        super().__init__(session, Budget)
+    def __init__(self, Client: Client):
+        super().__init__(Client, Budget)
     
     async def get_active_budgets(self) -> List[Budget]:
         """Get all active budgets"""
@@ -334,7 +301,7 @@ class BudgetRepository(BaseRepository[Budget]):
                 )
             )
             
-            result = await self.session.execute(query)
+            result = await self.Client.execute(query)
             return result.scalars().all()
         except Exception as e:
             raise ValueError(f"Failed to get budgets for date: {str(e)}")
@@ -346,8 +313,8 @@ class BudgetRepository(BaseRepository[Budget]):
 class BudgetAlertRepository(BaseRepository[BudgetAlert]):
     """Repository for BudgetAlert entities"""
     
-    def __init__(self, session: Session):
-        super().__init__(session, BudgetAlert)
+    def __init__(self, Client: Client):
+        super().__init__(Client, BudgetAlert)
     
     async def get_unacknowledged_alerts(self) -> List[BudgetAlert]:
         """Get all unacknowledged alerts"""
@@ -372,8 +339,8 @@ class BudgetAlertRepository(BaseRepository[BudgetAlert]):
 class OptimizationRecommendationRepository(BaseRepository[OptimizationRecommendation]):
     """Repository for OptimizationRecommendation entities"""
     
-    def __init__(self, session: Session):
-        super().__init__(session, OptimizationRecommendation)
+    def __init__(self, Client: Client):
+        super().__init__(Client, OptimizationRecommendation)
     
     async def get_by_provider(self, provider_id: UUID) -> List[OptimizationRecommendation]:
         """Get recommendations for a specific provider"""
@@ -407,7 +374,7 @@ class OptimizationRecommendationRepository(BaseRepository[OptimizationRecommenda
             
             query = query.where(and_(*conditions))
             
-            result = await self.session.execute(query)
+            result = await self.Client.execute(query)
             total = result.scalar()
             return total or Decimal('0')
         except Exception as e:
@@ -416,8 +383,8 @@ class OptimizationRecommendationRepository(BaseRepository[OptimizationRecommenda
 class AuditLogRepository(BaseRepository[AuditLog]):
     """Repository for AuditLog entities"""
     
-    def __init__(self, session: Session):
-        super().__init__(session, AuditLog)
+    def __init__(self, Client: Client):
+        super().__init__(Client, AuditLog)
     
     async def log_action(self, 
                         user_id: UUID,
@@ -460,13 +427,13 @@ class AuditLogRepository(BaseRepository[AuditLog]):
 class SystemConfigurationRepository(BaseRepository[SystemConfiguration]):
     """Repository for SystemConfiguration entities"""
     
-    def __init__(self, session: Session):
-        super().__init__(session, SystemConfiguration)
+    def __init__(self, Client: Client):
+        super().__init__(Client, SystemConfiguration)
     
     async def get_by_key(self, key: str) -> Optional[SystemConfiguration]:
         """Get configuration by key"""
         try:
-            result = await self.session.execute(
+            result = await self.Client.execute(
                 select(SystemConfiguration).where(SystemConfiguration.key == key)
             )
             return result.scalar_one_or_none()
@@ -499,3 +466,4 @@ class SystemConfigurationRepository(BaseRepository[SystemConfiguration]):
         """Get configuration value by key"""
         config = await self.get_by_key(key)
         return config.value if config else default
+

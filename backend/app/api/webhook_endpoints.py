@@ -8,9 +8,9 @@ from typing import List, Optional, Dict, Any
 
 from fastapi import APIRouter, HTTPException, Depends, Query, Path
 from pydantic import BaseModel, Field, validator
-from sqlalchemy.orm import Session
+from supabase import Client
 
-from app.database.database import get_db_session
+from app.database.database import get_supabase
 from app.services.webhook_manager import (
     WebhookManager, WebhookEndpoint, WebhookEventType, 
     WebhookSecurityType, WebhookStatus, get_webhook_manager,
@@ -213,7 +213,7 @@ async def update_webhook_endpoint(
     endpoint_data: WebhookEndpointUpdate = ...,
     current_user = Depends(get_current_user),
     webhook_manager: WebhookManager = Depends(get_webhook_manager),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Update webhook endpoint"""
     try:
@@ -394,7 +394,7 @@ async def get_webhook_deliveries(
     offset: int = Query(default=0, ge=0, description="Number of deliveries to skip"),
     success_only: Optional[bool] = Query(default=None, description="Filter by success status"),
     current_user = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Get webhook delivery history for an endpoint"""
     try:
@@ -483,3 +483,4 @@ def _get_security_config_schema(security_type: WebhookSecurityType) -> Dict[str,
         return {"username": "string (required)", "password": "string (required)"}
     else:
         return {}
+

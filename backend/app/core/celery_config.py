@@ -11,8 +11,9 @@ def create_celery_app() -> Celery:
     """Create and configure Celery application"""
     
     # Get configuration from environment
-    broker_url = os.getenv('CELERY_BROKER_URL', 'redis://localhost:6379/0')
-    result_backend = os.getenv('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+    # Use memory or filesystem for broker and result backend (Not Redis)
+    broker_url = os.getenv('CELERY_BROKER_URL', 'memory://')
+    result_backend = os.getenv('CELERY_RESULT_BACKEND', 'cache+memory://')
     
     # Create Celery app
     celery_app = Celery('finops_platform')

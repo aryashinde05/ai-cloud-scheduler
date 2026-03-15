@@ -17,9 +17,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, status, BackgroundTasks
 from pydantic import BaseModel, Field, validator
-from sqlalchemy.orm import Session
+from supabase import Client
 
-from app.database.database import get_db_session
+from app.database.database import get_supabase
 from app.services.startup_migration.models import User
 from app.services.approval_workflow_integration import enhanced_workflow_engine
 from app.services.decision_tracking_system import decision_tracker, notification_service, NotificationType
@@ -105,7 +105,7 @@ async def submit_for_approval(
     request: ApprovalSubmissionRequest,
     background_tasks: BackgroundTasks,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Submit an optimization decision for approval with enhanced tracking
@@ -173,7 +173,7 @@ async def process_approval_decision(
     approval_id: str,
     decision_request: ApprovalDecisionRequest,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Process an approval decision with immediate session participant notification
@@ -228,7 +228,7 @@ async def escalate_approval(
     approval_id: str,
     reason: str = "deadline_approaching",
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Escalate an approval request with intelligent notification routing
@@ -273,7 +273,7 @@ async def escalate_approval(
 async def get_approval_status(
     approval_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Get detailed approval status with tracking information"""
     try:
@@ -301,7 +301,7 @@ async def get_approval_status(
 async def get_decision_tracking(
     decision_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Get decision tracking information"""
     try:
@@ -328,7 +328,7 @@ async def get_decision_tracking(
 async def get_session_decisions(
     session_id: str,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Get all decisions for a collaborative session"""
     try:
@@ -350,7 +350,7 @@ async def send_session_notification(
     data: Dict[str, Any],
     priority: str = "medium",
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """
     Send notification to all session participants
@@ -398,7 +398,7 @@ async def get_user_notifications(
     user_id: str,
     limit: int = 50,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db_session)
+    db: Client = Depends(get_supabase)
 ):
     """Get notifications for a user"""
     try:
@@ -443,3 +443,4 @@ async def _monitor_approval_deadline(approval_id: str, deadline: datetime):
         
     except Exception as e:
         logger.error(f"Error monitoring approval deadline: {e}")
+
