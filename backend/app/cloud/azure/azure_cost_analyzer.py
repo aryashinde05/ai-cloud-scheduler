@@ -225,13 +225,7 @@ class AzureCostAnalyzer(BaseCostAnalyzer):
                         name="PreTaxCost",
                         function="Sum"
                     )
-                },
-                grouping=[
-                    QueryGrouping(
-                        type="Dimension",
-                        name="UsageDate"
-                    )
-                ]
+                }
             )
         )
 

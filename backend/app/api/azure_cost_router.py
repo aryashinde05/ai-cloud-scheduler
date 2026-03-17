@@ -195,7 +195,7 @@ async def analyze_azure_costs(
         )
 
 
-@router.get("/service-breakdown", response_model=List[ServiceCostResponse])
+@router.post("/service-breakdown", response_model=List[ServiceCostResponse])
 async def get_azure_service_breakdown(
     credentials: AzureCredentialsRequest,
     days: int = 30,
@@ -224,7 +224,7 @@ async def get_azure_service_breakdown(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/cost-trends")
+@router.post("/cost-trends")
 async def get_azure_cost_trends(
     credentials: AzureCredentialsRequest,
     days: int = 30,
@@ -240,7 +240,7 @@ async def get_azure_cost_trends(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/quick-wins", response_model=List[OptimizationOpportunityResponse])
+@router.post("/quick-wins", response_model=List[OptimizationOpportunityResponse])
 async def get_azure_quick_wins(
     credentials: AzureCredentialsRequest,
     current_user: User = Depends(get_current_user)
@@ -270,7 +270,7 @@ async def get_azure_quick_wins(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/opportunities/{opportunity_type}", response_model=List[OptimizationOpportunityResponse])
+@router.post("/opportunities/{opportunity_type}", response_model=List[OptimizationOpportunityResponse])
 async def get_azure_opportunities_by_type(
     opportunity_type: str,
     credentials: AzureCredentialsRequest,

@@ -34,6 +34,15 @@ const DimensionalFiltering = lazy(() => import('./pages/DimensionalFiltering'));
 const MigrationReport = lazy(() => import('./pages/MigrationReport'));
 const PlatformFloatingChat = lazy(() => import('./components/AI/PlatformFloatingChat'));
 
+// New Azure Pages
+const AzureDashboard = lazy(() => import('./pages/AzureDashboard'));
+const AzureConnection = lazy(() => import('./pages/AzureConnection'));
+const AzureAnalysis = lazy(() => import('./pages/AzureAnalysis'));
+const AzureOpportunities = lazy(() => import('./pages/AzureOpportunities'));
+
+// New AWS Pages
+const AwsConnection = lazy(() => import('./pages/AwsConnection'));
+
 // Theme
 const theme = createTheme({
   palette: {
@@ -151,6 +160,15 @@ function App() {
                   <Route path="/alerts" element={<PageLayout><Alerts /></PageLayout>} />
                   <Route path="/compliance" element={<PageLayout><Compliance /></PageLayout>} />
                   <Route path="/settings" element={<PageLayout><Settings /></PageLayout>} />
+
+                  {/* Azure Routes */}
+                  <Route path="/azure/dashboard" element={<PageLayout><AzureDashboard /></PageLayout>} />
+                  <Route path="/azure/connection" element={<PageLayout><AzureConnection /></PageLayout>} />
+                  <Route path="/azure/analysis" element={<PageLayout><AzureAnalysis /></PageLayout>} />
+                  <Route path="/azure/opportunities" element={<PageLayout><AzureOpportunities /></PageLayout>} />
+
+                  {/* AWS Routes */}
+                  <Route path="/aws/connection" element={<PageLayout><AwsConnection /></PageLayout>} />
                 </Routes>
                 <PlatformFloatingChat />
               </Suspense>

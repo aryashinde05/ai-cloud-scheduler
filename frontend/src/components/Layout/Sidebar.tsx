@@ -25,6 +25,10 @@ import {
   FlightTakeoff as MigrationIcon,
   Home as HomeIcon,
   AutoMode as AutoScaleIcon,
+  Cloud as CloudIcon,
+  Link as LinkIcon,
+  Insights as InsightsIcon,
+  Savings as SavingsIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 280;
@@ -68,6 +72,15 @@ const menuSections: MenuSection[] = [
     items: [
       { text: 'Compliance', icon: <ComplianceIcon />, path: '/compliance' },
       { text: 'Reports', icon: <ReportsIcon />, path: '/reports' },
+    ],
+  },
+  {
+    label: 'Azure Optimization',
+    items: [
+      { text: 'Dashboard', icon: <CloudIcon />, path: '/azure/dashboard' },
+      { text: 'Connection', icon: <LinkIcon />, path: '/azure/connection' },
+      { text: 'Analysis', icon: <InsightsIcon />, path: '/azure/analysis' },
+      { text: 'Opportunities', icon: <SavingsIcon />, path: '/azure/opportunities' },
     ],
   },
   {

@@ -22,6 +22,7 @@ load_dotenv()
 
 # Import database health check (Supabase)
 from app.database.database import database_health_check, initialize_database
+from app.database.session import init_db as init_sql_db
 
 # Import routers
 from app.api.auth_endpoints import auth_router
@@ -46,6 +47,7 @@ from app.api.api_logging_endpoints import router as api_logging_router
 from app.api.scheduler_endpoints import router as scheduler_router
 from app.api.scaling_rules_endpoints import router as scaling_rules_router
 from app.services.ai_services_documentation import router as ai_services_docs_router
+from app.api.aws_simple_endpoints import router as aws_simple_router
 
 # Structured logging config
 structlog.configure(
@@ -65,39 +67,25 @@ logger = structlog.get_logger(__name__)
 # Application lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting FinOps Platform API")
-
+    """
+    Lifespan events: Startup and Shutdown
+    """
+    # Startup
+    logger.info("Starting up FinOps Platform API...")
+    
+    # Initialize SQLAlchemy tables
     try:
-        # Check database connection
-        db_health = await database_health_check()
-
-        if db_health["status"] != "healthy":
-            logger.warning("Database unhealthy", details=db_health)
-        else:
-            logger.info("Database connected successfully")
-            try:
-                await initialize_database()
-            except Exception as e:
-                logger.error("Database initialization failed", error=str(e))    
-        logger.info("Database initialized")
-
+        init_sql_db()
+        logger.info("SQLAlchemy tables initialized")
     except Exception as e:
-        logger.error("Database initialization failed", error=str(e))
+        logger.error("Failed to initialize SQLAlchemy tables", error=str(e))
 
-        # Start webhook system
-        try:
-            from app.services.webhook_integration import start_webhook_system
-            await start_webhook_system()
-            logger.info("Webhook system started")
-        except Exception as e:
-            logger.warning("Webhook system failed to start", error=str(e))
-
-    except Exception as e:
-        logger.error("Startup failed", error=str(e))
-        raise
-
+    # Initialize Supabase connection
+    await initialize_database()
+    
     yield
-
+    
+    # Shutdown
     logger.info("Shutting down FinOps Platform API")
 
     try:
@@ -219,10 +207,9 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 
 
 # Include routers
-app.include_router(auth_router, prefix="/api/v1")
-app.include_router(cloud_router, prefix="/api/v1")
+app.include_router(auth_router)
 app.include_router(health_router)
-app.include_router(ai_assistant_router, prefix="/api/v1")
+app.include_router(aws_simple_router)
 app.include_router(aws_cost_router)
 app.include_router(azure_cost_router)
 app.include_router(aws_cost_alerts_router)
