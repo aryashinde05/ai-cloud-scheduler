@@ -1,83 +1,64 @@
 """
-Database configuration for FinOps Platform using Supabase
+Database configuration — Supabase optional, falls back gracefully.
 """
 
 import os
-from typing import Generator
 from dotenv import load_dotenv
-from supabase import create_client, Client
 import structlog
 
 load_dotenv()
 
 logger = structlog.get_logger(__name__)
 
-# Supabase configuration
-SUPABASE_URL: str = os.getenv("SUPABASE_URL")
-SUPABASE_KEY: str = os.getenv("SUPABASE_SERVICE_KEY")  # Use service key for server-side operations
+# Re-export Base from session so all existing imports work
+from app.database.session import Base  # noqa: F401
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in environment variables")
+logger = structlog.get_logger(__name__)
 
-# Create Supabase client
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY: str = os.getenv("SUPABASE_SERVICE_KEY", "")
 
-class Base:
-    """Mock Base class for SQLAlchemy compatibility"""
-    pass
+supabase = None
 
-def get_supabase() -> Client:
-    """
-    Dependency for FastAPI to access Supabase client
-    """
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        from supabase import create_client, Client
+        supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
+        logger.info("Supabase client initialized")
+    except Exception as e:
+        logger.warning("Supabase init failed, running without it", error=str(e))
+
+
+def get_supabase():
+    if supabase is None:
+        raise Exception("Supabase is not configured")
     return supabase
 
 
-def get_db_session() -> Client:
-    """
-    Compatibility function for older code using get_db_session
-    """
-    return supabase
+def get_db_session():
+    return get_supabase()
 
 
-def get_db() -> Client:
-    """
-    Compatibility function for older code using get_db
-    """
-    return supabase
+def get_db():
+    return get_supabase()
+
 
 def AsyncSessionLocal():
-    """Compatibility shim for AsyncSessionLocal"""
-    return supabase
+    return get_supabase()
 
-async def database_health_check() -> dict:
-    """
-    Check Supabase connection health
-    """
-    try:
-        # Simple query to verify connection
-        response = supabase.table("health_check").select("*").limit(1).execute()
-
-        return {
-            "status": "healthy",
-            "database": "supabase",
-            "message": "Supabase connection successful"
-        }
-
-    except Exception as e:
-        logger.error("Supabase health check failed", error=str(e))
-
-        return {
-            "status": "unhealthy",
-            "database": "supabase",
-            "error": str(e)
-        }
 
 async def initialize_database():
-    """
-    Create required tables if they do not exist.
-    """
+    if supabase:
+        logger.info("Supabase connection available")
+    else:
+        logger.info("Running without Supabase — using SQLAlchemy only")
+
+
+async def database_health_check() -> dict:
+    if supabase is None:
+        return {"status": "healthy", "backend": "SQLAlchemy (no Supabase)"}
     try:
-        supabase.rpc("create_tables_if_not_exist").execute()
+        supabase.table("health_check").select("*").limit(1).execute()
+        return {"status": "healthy", "backend": "Supabase"}
     except Exception as e:
-        logger.error("Database initialization failed", error=str(e))
+        return {"status": "unhealthy", "error": str(e)}

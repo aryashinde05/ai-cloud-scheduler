@@ -27,7 +27,7 @@ export default function AzureOpportunities() {
     setHasCredentials(!!creds);
   }, []);
 
-  const { data: opportunities, isLoading, error } = useQuery(
+  const { data: opportunities, isLoading, error } = useQuery<any[], Error>(
     ['azureOpportunities', activeTab],
     () => azureCostService.getOpportunities(activeTab),
     { enabled: hasCredentials, keepPreviousData: true }

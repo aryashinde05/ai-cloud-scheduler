@@ -1,20 +1,44 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   AppBar,
   Toolbar,
-  Typography,
   Box,
   IconButton,
-  Badge,
   Avatar,
   Chip,
+  Menu,
+  MenuItem,
+  Typography,
+  Divider,
 } from '@mui/material';
 import {
-  Notifications as NotificationsIcon,
   AccountCircle as AccountIcon,
+  Logout,
+  Settings,
 } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
+import NotificationBell from '../Notifications/NotificationBell';
 
 const Header: React.FC = () => {
+  const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+
+  const handleMenuOpen = (event: React.MouseEvent<HTMLElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+
+  const handleMenuClose = () => {
+    setAnchorEl(null);
+  };
+
+  const handleLogout = () => {
+    handleMenuClose();
+    logout();
+    navigate('/login');
+  };
+
   return (
     <AppBar
       position="fixed"
@@ -27,7 +51,6 @@ const Header: React.FC = () => {
       }}
     >
       <Toolbar sx={{ justifyContent: 'space-between' }}>
-        {/* Left side - empty for now since we have sidebar */}
         <Box />
 
         {/* Center - Status indicators */}
@@ -43,19 +66,48 @@ const Header: React.FC = () => {
           />
         </Box>
 
-        {/* Right side - User actions */}
+        {/* Right side - Notifications + User */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <IconButton color="inherit">
-            <Badge badgeContent={3} color="error">
-              <NotificationsIcon />
-            </Badge>
-          </IconButton>
+          <NotificationBell />
 
-          <IconButton color="inherit">
-            <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main' }}>
-              <AccountIcon />
+          <IconButton color="inherit" onClick={handleMenuOpen}>
+            <Avatar sx={{ width: 32, height: 32, bgcolor: 'primary.main', fontSize: '0.9rem' }}>
+              {user ? user.first_name?.[0]?.toUpperCase() : <AccountIcon />}
             </Avatar>
           </IconButton>
+
+          <Menu
+            anchorEl={anchorEl}
+            open={Boolean(anchorEl)}
+            onClose={handleMenuClose}
+            PaperProps={{
+              sx: {
+                background: 'rgba(26, 29, 58, 0.98)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                minWidth: 200,
+              },
+            }}
+          >
+            {user && (
+              <Box sx={{ px: 2, py: 1 }}>
+                <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                  {user.first_name} {user.last_name}
+                </Typography>
+                <Typography variant="caption" color="text.secondary">
+                  {user.email}
+                </Typography>
+              </Box>
+            )}
+            <Divider sx={{ borderColor: 'rgba(255,255,255,0.1)' }} />
+            <MenuItem onClick={() => { handleMenuClose(); navigate('/settings'); }}>
+              <Settings fontSize="small" sx={{ mr: 1 }} />
+              Settings
+            </MenuItem>
+            <MenuItem onClick={handleLogout} sx={{ color: 'error.main' }}>
+              <Logout fontSize="small" sx={{ mr: 1 }} />
+              Logout
+            </MenuItem>
+          </Menu>
         </Box>
       </Toolbar>
     </AppBar>

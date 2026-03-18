@@ -18,20 +18,27 @@ import {
     Storage
 } from '@mui/icons-material';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Navigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 const Home: React.FC = () => {
     const theme = useTheme();
     const navigate = useNavigate();
+    const { isAuthenticated, loading } = useAuth();
+
+    // Redirect logged-in users straight to the dashboard
+    if (!loading && isAuthenticated) {
+        return <Navigate to="/dashboard" replace />;
+    }
 
     const menuItems = [
         {
             title: 'Cloud Intelligence Dashboard',
-            description: 'Connect your AWS account for real-time cost analysis, automated scheduling, and RDS optimization.',
+            description: 'Connect AWS or Azure and get real-time cost analysis, automated scheduling, and resource optimization.',
             icon: <AutoGraph sx={{ fontSize: 48 }} />,
-            path: '/onboarding',
+            path: '/dashboard',
             color: theme.palette.primary.main,
-            features: ['Cost Optimization', 'Resource Scheduling', 'AWS RDS Support']
+            features: ['AWS Cost Optimization', 'Azure Cost Control', 'Resource Scheduling']
         },
         {
             title: 'Global Migration Planner',

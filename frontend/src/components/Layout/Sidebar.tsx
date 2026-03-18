@@ -10,6 +10,7 @@ import {
   Typography,
   Box,
   Divider,
+  Chip,
 } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
@@ -22,13 +23,13 @@ import {
   AttachMoney as MoneyIcon,
   EventNote as SchedulerIcon,
   Assessment as ReportsIcon,
-  FlightTakeoff as MigrationIcon,
   Home as HomeIcon,
   AutoMode as AutoScaleIcon,
-  Cloud as CloudIcon,
   Link as LinkIcon,
   Insights as InsightsIcon,
   Savings as SavingsIcon,
+  Storage as AwsIcon,
+  Cloud as AzureIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 280;
@@ -37,6 +38,7 @@ interface MenuItem {
   text: string;
   icon: React.ReactElement;
   path: string;
+  awsOnly?: boolean;
 }
 
 interface MenuSection {
@@ -54,9 +56,9 @@ const menuSections: MenuSection[] = [
   {
     label: 'Intelligence',
     items: [
-      { text: 'Smart Scheduler', icon: <SchedulerIcon />, path: '/scheduler' },
-      { text: 'Auto-Scaling Rules', icon: <AutoScaleIcon />, path: '/scaling-rules' },
-      { text: 'Optimization', icon: <OptimizationIcon />, path: '/optimization' },
+      { text: 'Smart Scheduler', icon: <SchedulerIcon />, path: '/scheduler', awsOnly: true },
+      { text: 'Auto-Scaling Rules', icon: <AutoScaleIcon />, path: '/scaling-rules', awsOnly: true },
+      { text: 'Optimization', icon: <OptimizationIcon />, path: '/optimization', awsOnly: true },
     ],
   },
   {
@@ -68,19 +70,26 @@ const menuSections: MenuSection[] = [
     ],
   },
   {
+    label: 'AWS',
+    items: [
+      { text: 'AWS Dashboard', icon: <AwsIcon />, path: '/aws/dashboard' },
+      { text: 'Connect AWS', icon: <LinkIcon />, path: '/onboarding' },
+    ],
+  },
+  {
+    label: 'Azure',
+    items: [
+      { text: 'Azure Dashboard', icon: <AzureIcon />, path: '/azure/dashboard' },
+      { text: 'Connect Azure', icon: <LinkIcon />, path: '/azure/connection' },
+      { text: 'Analysis', icon: <InsightsIcon />, path: '/azure/analysis' },
+      { text: 'Opportunities', icon: <SavingsIcon />, path: '/azure/opportunities' },
+    ],
+  },
+  {
     label: 'Governance',
     items: [
       { text: 'Compliance', icon: <ComplianceIcon />, path: '/compliance' },
       { text: 'Reports', icon: <ReportsIcon />, path: '/reports' },
-    ],
-  },
-  {
-    label: 'Azure Optimization',
-    items: [
-      { text: 'Dashboard', icon: <CloudIcon />, path: '/azure/dashboard' },
-      { text: 'Connection', icon: <LinkIcon />, path: '/azure/connection' },
-      { text: 'Analysis', icon: <InsightsIcon />, path: '/azure/analysis' },
-      { text: 'Opportunities', icon: <SavingsIcon />, path: '/azure/opportunities' },
     ],
   },
   {
@@ -128,7 +137,7 @@ const Sidebar: React.FC = () => {
             CloudPilot
           </Typography>
           <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-            AWS Cost Intelligence
+            Cloud Cost Intelligence
           </Typography>
         </Box>
       </Box>
@@ -193,6 +202,20 @@ const Sidebar: React.FC = () => {
                       },
                     }}
                   />
+                  {item.awsOnly && (
+                    <Chip
+                      label="AWS"
+                      size="small"
+                      sx={{
+                        height: 16,
+                        fontSize: '0.6rem',
+                        bgcolor: 'rgba(255,152,0,0.15)',
+                        color: '#ff9800',
+                        border: '1px solid rgba(255,152,0,0.3)',
+                        '& .MuiChip-label': { px: 0.75 },
+                      }}
+                    />
+                  )}
                 </ListItemButton>
               </ListItem>
             ))}

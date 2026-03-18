@@ -56,6 +56,7 @@ import {
 import numeral from 'numeral';
 import { useNavigate } from 'react-router-dom';
 import { SkeletonLoader } from '../components/Loading';
+import { api } from '../services/api';
 import {
   TOOLTIP_STYLE,
   AXIS_STYLE,
@@ -85,12 +86,12 @@ const Optimization: React.FC = () => {
       setLoading(true);
 
       const [actionsRes, statsRes] = await Promise.all([
-        fetch('http://localhost:8000/api/automation/actions'),
-        fetch('http://localhost:8000/api/automation/stats'),
+        api.get('/api/automation/actions'),
+        api.get('/api/automation/stats'),
       ]);
 
-      const actionsData = await actionsRes.json();
-      const statsData = await statsRes.json();
+      const actionsData = actionsRes.data;
+      const statsData = statsRes.data;
 
       if (actionsData.error === 'no_aws_account') {
         setNoAws(true);
@@ -184,7 +185,7 @@ const Optimization: React.FC = () => {
   const confirmImplementation = async () => {
     if (selectedRecommendation) {
       try {
-        await fetch(`http://localhost:8000/api/automation/actions/${selectedRecommendation.resource}/execute`, { method: 'POST' });
+        await api.post(`/api/automation/actions/${selectedRecommendation.resource}/execute`);
       } catch (e) {
         console.error('Error executing action:', e);
       }

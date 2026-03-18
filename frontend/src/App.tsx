@@ -6,6 +6,12 @@ import { QueryClient, QueryClientProvider } from 'react-query';
 import { Toaster } from 'react-hot-toast';
 import { HelmetProvider } from 'react-helmet-async';
 
+import { AuthProvider } from './contexts/AuthContext';
+import { NotificationProvider } from './contexts/NotificationContext';
+import ProtectedRoute from './components/ProtectedRoute';
+import Login from './pages/Login';
+import Register from './pages/Register';
+
 // Components (always loaded)
 import Sidebar from './components/Layout/Sidebar';
 import Header from './components/Layout/Header';
@@ -15,6 +21,8 @@ import { LoadingSpinner } from './components/Loading';
 // Lazy-loaded pages for code splitting
 const OnboardingQuickStart = lazy(() => import('./pages/OnboardingQuickStart'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
+// AWS-specific dashboard (cost/resources view)
+const AwsDashboard = lazy(() => import('./pages/AwsDashboard'));
 const CostAnalysis = lazy(() => import('./pages/CostAnalysis'));
 const BudgetManagement = lazy(() => import('./pages/BudgetManagement'));
 const Optimization = lazy(() => import('./pages/Optimization'));
@@ -125,66 +133,85 @@ const PageLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   </Box>
 );
 
+const ProtectedPage = ({ children }: { children: React.ReactElement }) => (
+  <ProtectedRoute>
+    <PageLayout>{children}</PageLayout>
+  </ProtectedRoute>
+);
+
+const ProtectedRouteWrapper = ({ children }: { children: React.ReactElement }) => (
+  <ProtectedRoute>{children}</ProtectedRoute>
+);
+
 function App() {
   return (
     <ErrorBoundary>
       <HelmetProvider>
         <QueryClientProvider client={queryClient}>
-          <ThemeProvider theme={theme}>
-            <CssBaseline />
-            <Router>
-              <Suspense fallback={<LoadingSpinner />}>
-                <Routes>
-                  {/* Main Entry Points */}
-                  <Route path="/" element={<Home />} />
-                  <Route path="/onboarding" element={<OnboardingQuickStart />} />
+          <AuthProvider>
+            <NotificationProvider>
+            <ThemeProvider theme={theme}>
+              <CssBaseline />
+              <Router>
+                <Suspense fallback={<LoadingSpinner />}>
+                  <Routes>
+                    {/* Public Routes */}
+                    <Route path="/login" element={<Login />} />
+                    <Route path="/register" element={<Register />} />
+                    <Route path="/" element={<Home />} />
+                    
+                    {/* Protected Routes */}
+                    <Route path="/onboarding" element={<ProtectedRouteWrapper><OnboardingQuickStart /></ProtectedRouteWrapper>} />
 
-                  {/* Migration Wizard - No Sidebar/Header */}
-                  <Route path="/migration-wizard" element={<MigrationWizard />} />
-                  <Route path="/migration-wizard/:projectId" element={<MigrationWizard />} />
-                  <Route path="/migration/:projectId/recommendations" element={<ProviderRecommendations />} />
-                  <Route path="/migration/:projectId/results" element={<MigrationResults />} />
-                  <Route path="/migration/:projectId/dashboard" element={<MigrationDashboard />} />
-                  <Route path="/migration/:projectId/resources" element={<ResourceOrganization />} />
-                  <Route path="/migration/:projectId/filtering" element={<DimensionalFiltering />} />
-                  <Route path="/migration/:projectId/report" element={<MigrationReport />} />
+                    {/* Migration Wizard - Protected */}
+                    <Route path="/migration-wizard" element={<ProtectedRouteWrapper><MigrationWizard /></ProtectedRouteWrapper>} />
+                    <Route path="/migration-wizard/:projectId" element={<ProtectedRouteWrapper><MigrationWizard /></ProtectedRouteWrapper>} />
+                    <Route path="/migration/:projectId/recommendations" element={<ProtectedRouteWrapper><ProviderRecommendations /></ProtectedRouteWrapper>} />
+                    <Route path="/migration/:projectId/results" element={<ProtectedRouteWrapper><MigrationResults /></ProtectedRouteWrapper>} />
+                    <Route path="/migration/:projectId/dashboard" element={<ProtectedRouteWrapper><MigrationDashboard /></ProtectedRouteWrapper>} />
+                    <Route path="/migration/:projectId/resources" element={<ProtectedRouteWrapper><ResourceOrganization /></ProtectedRouteWrapper>} />
+                    <Route path="/migration/:projectId/filtering" element={<ProtectedRouteWrapper><DimensionalFiltering /></ProtectedRouteWrapper>} />
+                    <Route path="/migration/:projectId/report" element={<ProtectedRouteWrapper><MigrationReport /></ProtectedRouteWrapper>} />
 
-                  {/* Dashboard Routes */}
-                  <Route path="/dashboard" element={<PageLayout><Dashboard /></PageLayout>} />
-                  <Route path="/scheduler" element={<PageLayout><SchedulerDashboard /></PageLayout>} />
-                  <Route path="/scaling-rules" element={<PageLayout><ScalingRules /></PageLayout>} />
-                  <Route path="/cost-analysis" element={<PageLayout><CostAnalysis /></PageLayout>} />
-                  <Route path="/budgets" element={<PageLayout><BudgetManagement /></PageLayout>} />
-                  <Route path="/optimization" element={<PageLayout><Optimization /></PageLayout>} />
-                  <Route path="/reports" element={<PageLayout><Reports /></PageLayout>} />
-                  <Route path="/alerts" element={<PageLayout><Alerts /></PageLayout>} />
-                  <Route path="/compliance" element={<PageLayout><Compliance /></PageLayout>} />
-                  <Route path="/settings" element={<PageLayout><Settings /></PageLayout>} />
+                    {/* Dashboard Routes - Protected */}
+                    <Route path="/dashboard" element={<ProtectedPage><Dashboard /></ProtectedPage>} />
+                    <Route path="/aws/dashboard" element={<ProtectedPage><AwsDashboard /></ProtectedPage>} />
+                    <Route path="/scheduler" element={<ProtectedPage><SchedulerDashboard /></ProtectedPage>} />
+                    <Route path="/scaling-rules" element={<ProtectedPage><ScalingRules /></ProtectedPage>} />
+                    <Route path="/cost-analysis" element={<ProtectedPage><CostAnalysis /></ProtectedPage>} />
+                    <Route path="/budgets" element={<ProtectedPage><BudgetManagement /></ProtectedPage>} />
+                    <Route path="/optimization" element={<ProtectedPage><Optimization /></ProtectedPage>} />
+                    <Route path="/reports" element={<ProtectedPage><Reports /></ProtectedPage>} />
+                    <Route path="/alerts" element={<ProtectedPage><Alerts /></ProtectedPage>} />
+                    <Route path="/compliance" element={<ProtectedPage><Compliance /></ProtectedPage>} />
+                    <Route path="/settings" element={<ProtectedPage><Settings /></ProtectedPage>} />
 
-                  {/* Azure Routes */}
-                  <Route path="/azure/dashboard" element={<PageLayout><AzureDashboard /></PageLayout>} />
-                  <Route path="/azure/connection" element={<PageLayout><AzureConnection /></PageLayout>} />
-                  <Route path="/azure/analysis" element={<PageLayout><AzureAnalysis /></PageLayout>} />
-                  <Route path="/azure/opportunities" element={<PageLayout><AzureOpportunities /></PageLayout>} />
+                    {/* Azure Routes - Protected */}
+                    <Route path="/azure/dashboard" element={<ProtectedPage><AzureDashboard /></ProtectedPage>} />
+                    <Route path="/azure/connection" element={<ProtectedPage><AzureConnection /></ProtectedPage>} />
+                    <Route path="/azure/analysis" element={<ProtectedPage><AzureAnalysis /></ProtectedPage>} />
+                    <Route path="/azure/opportunities" element={<ProtectedPage><AzureOpportunities /></ProtectedPage>} />
 
-                  {/* AWS Routes */}
-                  <Route path="/aws/connection" element={<PageLayout><AwsConnection /></PageLayout>} />
-                </Routes>
-                <PlatformFloatingChat />
-              </Suspense>
-            </Router>
-            <Toaster
-              position="top-right"
-              toastOptions={{
-                duration: 4000,
-                style: {
-                  background: '#1a1d3a',
-                  color: '#fff',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
-                },
-              }}
-            />
-          </ThemeProvider>
+                    {/* AWS Routes - Protected */}
+                    <Route path="/aws/connection" element={<ProtectedPage><AwsConnection /></ProtectedPage>} />
+                  </Routes>
+                  <PlatformFloatingChat />
+                </Suspense>
+              </Router>
+              <Toaster
+                position="top-right"
+                toastOptions={{
+                  duration: 4000,
+                  style: {
+                    background: '#1a1d3a',
+                    color: '#fff',
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                  },
+                }}
+              />
+            </ThemeProvider>
+            </NotificationProvider>
+          </AuthProvider>
         </QueryClientProvider>
       </HelmetProvider>
     </ErrorBoundary>

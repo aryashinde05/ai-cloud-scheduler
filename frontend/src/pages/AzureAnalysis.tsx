@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { Box, Typography, Button, Paper, Grid, TextField, Card, CardContent, Divider, Chip, Stack } from '@mui/material';
+import { Box, Typography, Button, Paper, Grid, TextField, Card, CardContent, Divider, Chip, Stack, Alert } from '@mui/material';
 import { useMutation } from 'react-query';
 import { azureCostService } from '../services/azureCostService';
 import { Analytics, Science, Insights, TrendingUp, AccountBalance } from '@mui/icons-material';
 import { Helmet } from 'react-helmet-async';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 
 export default function AzureAnalysis() {
   const [daysBack, setDaysBack] = useState(30);
+  const navigate = useNavigate();
   
   const mutation = useMutation((data: { days_back: number }) => 
     azureCostService.analyzeCost(data)

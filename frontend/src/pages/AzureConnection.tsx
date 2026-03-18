@@ -4,8 +4,10 @@ import { azureCostService } from '../services/azureCostService';
 import { Power, CheckCircleOutline, ErrorOutline, Visibility, VisibilityOff, Storage, VpnKey, Business, Badge } from '@mui/icons-material';
 import { Helmet } from 'react-helmet-async';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 
 export default function AzureConnection() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
@@ -52,7 +54,12 @@ export default function AzureConnection() {
       }
     } catch (err: any) {
       setStatus('error');
-      setErrorMessage(err.response?.data?.detail || err.message || 'Failed to connect to Azure APIs.');
+      const rawMsg: string = err.response?.data?.detail || err.message || 'Failed to connect to Azure APIs.';
+      // Provide a friendlier hint for the most common Azure auth mistake
+      const friendlyMsg = rawMsg.includes('AADSTS7000215')
+        ? 'Invalid client secret. Make sure you are entering the Secret VALUE (not the Secret ID) from Azure Portal → App Registrations → Certificates & Secrets.'
+        : rawMsg;
+      setErrorMessage(friendlyMsg);
     } finally {
       setLoading(false);
     }
@@ -63,6 +70,9 @@ export default function AzureConnection() {
       <Helmet><title>Azure Connection | FinOps</title></Helmet>
       
       <Box sx={{ mb: 4 }}>
+        <Button variant="text" color="inherit" onClick={() => navigate('/dashboard')} sx={{ opacity: 0.6, mb: 2, p: 0 }}>
+          ← Back to Dashboard
+        </Button>
         <Typography variant="h4" fontWeight={700} gutterBottom>
           Connect Azure Account
         </Typography>

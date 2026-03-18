@@ -99,10 +99,9 @@ def get_resources(db: Session = Depends(get_db)):
 def get_instances(db: Session = Depends(get_db)):
     account = AwsAccount.get_default(db)
     if not account:
-         raise HTTPException(status_code=400, detail="AWS account not configured. Connect first.")
+        raise HTTPException(status_code=400, detail="AWS account not configured. Connect first.")
 
     try:
-        # Assuming resources are already refreshed via /resources or background job
         resources = (
             db.query(Resource)
             .filter(Resource.aws_account_id == account.id, Resource.resource_type == "ec2_instance")
@@ -116,4 +115,37 @@ def get_instances(db: Session = Depends(get_db)):
             for r in resources
         ]
     except Exception as e:
-         raise HTTPException(status_code=500, detail=f"Backend error: {e}")
+        raise HTTPException(status_code=500, detail=f"Backend error: {e}")
+
+
+@router.delete("/disconnect")
+def disconnect_aws_account(db: Session = Depends(get_db)):
+    """Remove the stored AWS account credentials."""
+    account = AwsAccount.get_default(db)
+    if not account:
+        raise HTTPException(status_code=404, detail="No AWS account connected.")
+    db.delete(account)
+    db.commit()
+    return {"message": "AWS account disconnected successfully"}
+
+
+@router.get("/dashboard")
+def get_dashboard_summary(db: Session = Depends(get_db)):
+    """Lightweight dashboard summary for the onboarding success screen."""
+    account = AwsAccount.get_default(db)
+    if not account:
+        return {"finops_summary": None}
+
+    resources = db.query(Resource).filter(Resource.aws_account_id == account.id).all()
+    idle_count = sum(1 for r in resources if r.is_idle)
+    oversized_count = sum(1 for r in resources if r.is_oversized)
+    unattached_count = sum(1 for r in resources if r.is_unattached)
+
+    return {
+        "finops_summary": {
+            "totalMonthlyCost": 0,
+            "monthlySavings": 0,
+            "optimizationOpportunities": idle_count + oversized_count + unattached_count,
+            "resourceCount": len(resources),
+        }
+    }

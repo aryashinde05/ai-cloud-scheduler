@@ -69,14 +69,14 @@ const Register: React.FC = () => {
     }
 
     const success = await register({
-      firstName: formData.firstName,
-      lastName: formData.lastName,
+      first_name: formData.firstName,
+      last_name: formData.lastName,
       email: formData.email,
       password: formData.password,
     });
     
     if (success) {
-      navigate('/dashboard');
+      navigate('/login');
     }
     
     setLoading(false);

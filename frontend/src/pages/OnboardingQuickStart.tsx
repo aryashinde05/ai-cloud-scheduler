@@ -22,10 +22,10 @@ import {
 import { motion } from 'framer-motion';
 import { CheckCircle, RocketLaunch } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
-import axios from 'axios';
 import toast from 'react-hot-toast';
-import { AWS_REGIONS, getRegionsByLocation } from '../utils/awsRegions';
+import { getRegionsByLocation } from '../utils/awsRegions';
 import { useMutation } from 'react-query';
+import { awsService } from '../services/awsService';
 
 const steps = ['Connect AWS Account', 'Analyzing Costs', 'Results Ready'];
 
@@ -34,8 +34,8 @@ const OnboardingQuickStart: React.FC = () => {
     const navigate = useNavigate();
     const [activeStep, setActiveStep] = useState(0);
     const [credentials, setCredentials] = useState({
-        access_key_id: '',
-        secret_access_key: '',
+        access_key: '',
+        secret_key: '',
         region: 'us-east-1',
     });
     const [analysisResult, setAnalysisResult] = useState<any>(null);
@@ -43,14 +43,11 @@ const OnboardingQuickStart: React.FC = () => {
     useEffect(() => {
         const checkStatus = async () => {
             try {
-                const response = await axios.get('http://localhost:8000/api/v1/aws/status');
-                if (response.data.connected) {
-                    // Fetch real numbers for the success screen
-                    const dashRes = await fetch('http://localhost:8000/api/dashboard');
-                    const dashData = await dashRes.json();
-
+                const status = await awsService.getStatus();
+                if (status.connected) {
+                    const dashData = await awsService.getDashboard();
                     setAnalysisResult({
-                        account_id: response.data.account_id,
+                        account_id: status.region,
                         potential_savings: dashData?.finops_summary?.monthlySavings || 0,
                         total_cost: dashData?.finops_summary?.totalMonthlyCost || 0,
                         optimization_opportunities: dashData?.finops_summary?.optimizationOpportunities || 0,
@@ -66,45 +63,35 @@ const OnboardingQuickStart: React.FC = () => {
 
     const onboardingMutation = useMutation(
         async (data: typeof credentials) => {
-            const response = await axios.post('http://localhost:8000/api/v1/onboarding/quick-setup', data);
-            return response.data;
+            // Map to backend field names expected by /api/v1/aws/connect
+            return await awsService.connect({
+                access_key: data.access_key,
+                secret_key: data.secret_key,
+                region: data.region,
+            });
         },
         {
-            onSuccess: (data) => {
-                toast.success(data.message);
+            onSuccess: async (data) => {
+                toast.success(data.message || 'AWS account connected successfully');
                 setActiveStep(1);
-
-                // Fetch dashboard data to get real savings info
-                fetch('http://localhost:8000/api/dashboard')
-                    .then(res => res.json())
-                    .then(dashData => {
-                        setAnalysisResult({
-                            account_id: data.account_id,
-                            potential_savings: dashData?.finops_summary?.monthlySavings || 0,
-                            total_cost: dashData?.finops_summary?.totalMonthlyCost || 0,
-                            optimization_opportunities: dashData?.finops_summary?.optimizationOpportunities || 0,
-                        });
-                        setActiveStep(2);
-                    })
-                    .catch(() => {
-                        setAnalysisResult({
-                            account_id: data.account_id,
-                            potential_savings: 0,
-                            total_cost: 0,
-                            optimization_opportunities: 0,
-                        });
-                        setActiveStep(2);
-                    });
+                const dashData = await awsService.getDashboard();
+                setAnalysisResult({
+                    account_id: data.account_id || 'Connected',
+                    potential_savings: dashData?.finops_summary?.monthlySavings || 0,
+                    total_cost: dashData?.finops_summary?.totalMonthlyCost || 0,
+                    optimization_opportunities: dashData?.finops_summary?.optimizationOpportunities || 0,
+                });
+                setActiveStep(2);
             },
             onError: (error: any) => {
-                toast.error(error.response?.data?.message || error.response?.data?.detail || 'Failed to connect. Please check credentials.');
+                toast.error(error?.message || 'Failed to connect. Please check credentials.');
             },
         }
     );
 
     const handleNext = () => {
         if (activeStep === 0) {
-            if (!credentials.access_key_id || !credentials.secret_access_key) {
+            if (!credentials.access_key || !credentials.secret_key) {
                 toast.error("Please enter your AWS credentials");
                 return;
             }
@@ -116,17 +103,13 @@ const OnboardingQuickStart: React.FC = () => {
 
     const handleDisconnect = async () => {
         try {
-            await axios.post('http://localhost:8000/api/v1/aws/disconnect');
+            await awsService.disconnect();
             setActiveStep(0);
             setAnalysisResult(null);
-            setCredentials({
-                access_key_id: '',
-                secret_access_key: '',
-                region: 'us-east-1',
-            });
+            setCredentials({ access_key: '', secret_key: '', region: 'us-east-1' });
             toast.success("Disconnected. You can now enter new credentials.");
-        } catch (error) {
-            toast.error("Failed to disconnect.");
+        } catch (error: any) {
+            toast.error(error?.message || "Failed to disconnect.");
         }
     };
 
@@ -140,6 +123,16 @@ const OnboardingQuickStart: React.FC = () => {
             }}
         >
             <Container maxWidth="md">
+                <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+                    <Button variant="text" color="inherit" onClick={() => navigate('/dashboard')} sx={{ opacity: 0.6 }}>
+                        ← Back to Dashboard
+                    </Button>
+                    {activeStep === 0 && (
+                        <Button variant="text" color="inherit" onClick={() => navigate('/dashboard')} sx={{ opacity: 0.5, fontSize: '0.8rem' }}>
+                            Skip — I'll connect later
+                        </Button>
+                    )}
+                </Box>
                 <Typography variant="h4" align="center" sx={{ mb: 6, fontWeight: 700 }}>
                     Connect Your AWS Account
                 </Typography>
@@ -186,8 +179,8 @@ const OnboardingQuickStart: React.FC = () => {
                                         <TextField
                                             fullWidth
                                             label="Access Key ID"
-                                            value={credentials.access_key_id}
-                                            onChange={(e) => setCredentials({ ...credentials, access_key_id: e.target.value })}
+                                            value={credentials.access_key}
+                                            onChange={(e) => setCredentials({ ...credentials, access_key: e.target.value })}
                                         />
                                     </Grid>
                                     <Grid item xs={12}>
@@ -195,8 +188,8 @@ const OnboardingQuickStart: React.FC = () => {
                                             fullWidth
                                             type="password"
                                             label="Secret Access Key"
-                                            value={credentials.secret_access_key}
-                                            onChange={(e) => setCredentials({ ...credentials, secret_access_key: e.target.value })}
+                                            value={credentials.secret_key}
+                                            onChange={(e) => setCredentials({ ...credentials, secret_key: e.target.value })}
                                         />
                                     </Grid>
                                     <Grid item xs={12}>
