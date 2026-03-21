@@ -28,4 +28,13 @@ def init_db():
     from app.models.aws_account import AwsAccount
     from app.models.resource import Resource
     from app.api.auth_endpoints import UserDB  # ensure auth_users table is created
+    # Import migration advisor models to ensure their tables are created
+    from app.services.migration_advisor.migration_advisor.models import (
+        MigrationProject, OrganizationProfile, WorkloadProfile,
+        PerformanceRequirements, ComplianceRequirements, BudgetConstraints,
+        TechnicalRequirements, ProviderEvaluation, RecommendationReport,
+        MigrationPlan, MigrationPhase, OrganizationalStructure,
+        CategorizedResource, BaselineMetrics, MigrationReport,
+    )
     Base.metadata.create_all(bind=engine)
+

@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import { CssBaseline, Box } from '@mui/material';
 import { QueryClient, QueryClientProvider } from 'react-query';
@@ -18,10 +18,10 @@ import Header from './components/Layout/Header';
 import ErrorBoundary from './components/ErrorBoundary';
 import { LoadingSpinner } from './components/Loading';
 
-// Lazy-loaded pages for code splitting
+// Lazy-loaded pages
 const OnboardingQuickStart = lazy(() => import('./pages/OnboardingQuickStart'));
+const ServiceSelection = lazy(() => import('./pages/ServiceSelection'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
-// AWS-specific dashboard (cost/resources view)
 const AwsDashboard = lazy(() => import('./pages/AwsDashboard'));
 const CostAnalysis = lazy(() => import('./pages/CostAnalysis'));
 const BudgetManagement = lazy(() => import('./pages/BudgetManagement'));
@@ -32,23 +32,16 @@ const Alerts = lazy(() => import('./pages/Alerts'));
 const Compliance = lazy(() => import('./pages/Compliance'));
 const SchedulerDashboard = lazy(() => import('./pages/SchedulerDashboard'));
 const ScalingRules = lazy(() => import('./pages/ScalingRules'));
-const Home = lazy(() => import('./pages/Home'));
 const MigrationWizard = lazy(() => import('./pages/MigrationWizard'));
-const MigrationResults = lazy(() => import('./pages/MigrationResults'));
-const MigrationDashboard = lazy(() => import('./pages/MigrationDashboard'));
-const ProviderRecommendations = lazy(() => import('./pages/ProviderRecommendations'));
-const ResourceOrganization = lazy(() => import('./pages/ResourceOrganization'));
-const DimensionalFiltering = lazy(() => import('./pages/DimensionalFiltering'));
-const MigrationReport = lazy(() => import('./pages/MigrationReport'));
 const PlatformFloatingChat = lazy(() => import('./components/AI/PlatformFloatingChat'));
 
-// New Azure Pages
+// Azure Pages
 const AzureDashboard = lazy(() => import('./pages/AzureDashboard'));
 const AzureConnection = lazy(() => import('./pages/AzureConnection'));
 const AzureAnalysis = lazy(() => import('./pages/AzureAnalysis'));
 const AzureOpportunities = lazy(() => import('./pages/AzureOpportunities'));
 
-// New AWS Pages
+// AWS Pages
 const AwsConnection = lazy(() => import('./pages/AwsConnection'));
 
 // Theme
@@ -118,8 +111,8 @@ const queryClient = new QueryClient({
   },
 });
 
-// Reusable layout wrapper with Suspense
-const PageLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+// Dashboard shell: sidebar + header
+const DashboardLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <Box sx={{ display: 'flex', minHeight: '100vh' }}>
     <Sidebar />
     <Box sx={{ flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
@@ -133,13 +126,31 @@ const PageLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   </Box>
 );
 
-const ProtectedPage = ({ children }: { children: React.ReactElement }) => (
+// Migration shell: no sidebar, just a top bar (Header handles user/logout)
+const MigrationLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <Box sx={{ display: 'flex', flexDirection: 'column', minHeight: '100vh' }}>
+    <Header />
+    <Box component="main" sx={{ flexGrow: 1, mt: 8 }}>
+      <Suspense fallback={<LoadingSpinner />}>
+        {children}
+      </Suspense>
+    </Box>
+  </Box>
+);
+
+const ProtectedDashboard = ({ children }: { children: React.ReactElement }) => (
   <ProtectedRoute>
-    <PageLayout>{children}</PageLayout>
+    <DashboardLayout>{children}</DashboardLayout>
   </ProtectedRoute>
 );
 
-const ProtectedRouteWrapper = ({ children }: { children: React.ReactElement }) => (
+const ProtectedMigration = ({ children }: { children: React.ReactElement }) => (
+  <ProtectedRoute>
+    <MigrationLayout>{children}</MigrationLayout>
+  </ProtectedRoute>
+);
+
+const ProtectedFull = ({ children }: { children: React.ReactElement }) => (
   <ProtectedRoute>{children}</ProtectedRoute>
 );
 
@@ -155,45 +166,46 @@ function App() {
               <Router>
                 <Suspense fallback={<LoadingSpinner />}>
                   <Routes>
-                    {/* Public Routes */}
+                    {/* Public routes */}
                     <Route path="/login" element={<Login />} />
                     <Route path="/register" element={<Register />} />
-                    <Route path="/" element={<Home />} />
-                    
-                    {/* Protected Routes */}
-                    <Route path="/onboarding" element={<ProtectedRouteWrapper><OnboardingQuickStart /></ProtectedRouteWrapper>} />
+                    <Route path="/" element={<Navigate to="/login" replace />} />
 
-                    {/* Migration Wizard - Protected */}
-                    <Route path="/migration-wizard" element={<ProtectedRouteWrapper><MigrationWizard /></ProtectedRouteWrapper>} />
-                    <Route path="/migration-wizard/:projectId" element={<ProtectedRouteWrapper><MigrationWizard /></ProtectedRouteWrapper>} />
-                    <Route path="/migration/:projectId/recommendations" element={<ProtectedRouteWrapper><ProviderRecommendations /></ProtectedRouteWrapper>} />
-                    <Route path="/migration/:projectId/results" element={<ProtectedRouteWrapper><MigrationResults /></ProtectedRouteWrapper>} />
-                    <Route path="/migration/:projectId/dashboard" element={<ProtectedRouteWrapper><MigrationDashboard /></ProtectedRouteWrapper>} />
-                    <Route path="/migration/:projectId/resources" element={<ProtectedRouteWrapper><ResourceOrganization /></ProtectedRouteWrapper>} />
-                    <Route path="/migration/:projectId/filtering" element={<ProtectedRouteWrapper><DimensionalFiltering /></ProtectedRouteWrapper>} />
-                    <Route path="/migration/:projectId/report" element={<ProtectedRouteWrapper><MigrationReport /></ProtectedRouteWrapper>} />
+                    {/* Service selection — protected, no sidebar */}
+                    <Route path="/select" element={
+                      <ProtectedFull><Suspense fallback={<LoadingSpinner />}><ServiceSelection /></Suspense></ProtectedFull>
+                    } />
 
-                    {/* Dashboard Routes - Protected */}
-                    <Route path="/dashboard" element={<ProtectedPage><Dashboard /></ProtectedPage>} />
-                    <Route path="/aws/dashboard" element={<ProtectedPage><AwsDashboard /></ProtectedPage>} />
-                    <Route path="/scheduler" element={<ProtectedPage><SchedulerDashboard /></ProtectedPage>} />
-                    <Route path="/scaling-rules" element={<ProtectedPage><ScalingRules /></ProtectedPage>} />
-                    <Route path="/cost-analysis" element={<ProtectedPage><CostAnalysis /></ProtectedPage>} />
-                    <Route path="/budgets" element={<ProtectedPage><BudgetManagement /></ProtectedPage>} />
-                    <Route path="/optimization" element={<ProtectedPage><Optimization /></ProtectedPage>} />
-                    <Route path="/reports" element={<ProtectedPage><Reports /></ProtectedPage>} />
-                    <Route path="/alerts" element={<ProtectedPage><Alerts /></ProtectedPage>} />
-                    <Route path="/compliance" element={<ProtectedPage><Compliance /></ProtectedPage>} />
-                    <Route path="/settings" element={<ProtectedPage><Settings /></ProtectedPage>} />
+                    {/* Onboarding — protected, no sidebar */}
+                    <Route path="/onboarding" element={
+                      <ProtectedFull><Suspense fallback={<LoadingSpinner />}><OnboardingQuickStart /></Suspense></ProtectedFull>
+                    } />
 
-                    {/* Azure Routes - Protected */}
-                    <Route path="/azure/dashboard" element={<ProtectedPage><AzureDashboard /></ProtectedPage>} />
-                    <Route path="/azure/connection" element={<ProtectedPage><AzureConnection /></ProtectedPage>} />
-                    <Route path="/azure/analysis" element={<ProtectedPage><AzureAnalysis /></ProtectedPage>} />
-                    <Route path="/azure/opportunities" element={<ProtectedPage><AzureOpportunities /></ProtectedPage>} />
+                    {/* ── Migration module — isolated, no sidebar ── */}
+                    <Route path="/migration-wizard" element={<ProtectedMigration><MigrationWizard /></ProtectedMigration>} />
+                    <Route path="/migration-wizard/:projectId" element={<ProtectedMigration><MigrationWizard /></ProtectedMigration>} />
 
-                    {/* AWS Routes - Protected */}
-                    <Route path="/aws/connection" element={<ProtectedPage><AwsConnection /></ProtectedPage>} />
+                    {/* ── Cloud Dashboard module — sidebar layout ── */}
+                    <Route path="/dashboard" element={<ProtectedDashboard><Dashboard /></ProtectedDashboard>} />
+                    <Route path="/aws/dashboard" element={<ProtectedDashboard><AwsDashboard /></ProtectedDashboard>} />
+                    <Route path="/scheduler" element={<ProtectedDashboard><SchedulerDashboard /></ProtectedDashboard>} />
+                    <Route path="/scaling-rules" element={<ProtectedDashboard><ScalingRules /></ProtectedDashboard>} />
+                    <Route path="/cost-analysis" element={<ProtectedDashboard><CostAnalysis /></ProtectedDashboard>} />
+                    <Route path="/budgets" element={<ProtectedDashboard><BudgetManagement /></ProtectedDashboard>} />
+                    <Route path="/optimization" element={<ProtectedDashboard><Optimization /></ProtectedDashboard>} />
+                    <Route path="/reports" element={<ProtectedDashboard><Reports /></ProtectedDashboard>} />
+                    <Route path="/alerts" element={<ProtectedDashboard><Alerts /></ProtectedDashboard>} />
+                    <Route path="/compliance" element={<ProtectedDashboard><Compliance /></ProtectedDashboard>} />
+                    <Route path="/settings" element={<ProtectedDashboard><Settings /></ProtectedDashboard>} />
+
+                    {/* Azure routes */}
+                    <Route path="/azure/dashboard" element={<ProtectedDashboard><AzureDashboard /></ProtectedDashboard>} />
+                    <Route path="/azure/connection" element={<ProtectedDashboard><AzureConnection /></ProtectedDashboard>} />
+                    <Route path="/azure/analysis" element={<ProtectedDashboard><AzureAnalysis /></ProtectedDashboard>} />
+                    <Route path="/azure/opportunities" element={<ProtectedDashboard><AzureOpportunities /></ProtectedDashboard>} />
+
+                    {/* AWS routes */}
+                    <Route path="/aws/connection" element={<ProtectedDashboard><AwsConnection /></ProtectedDashboard>} />
                   </Routes>
                   <PlatformFloatingChat />
                 </Suspense>

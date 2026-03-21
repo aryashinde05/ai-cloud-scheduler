@@ -51,7 +51,7 @@ const Login: React.FC = () => {
     const success = await login(formData.email, formData.password);
     
     if (success) {
-      navigate('/dashboard');
+      navigate('/select');
     }
     
     setLoading(false);

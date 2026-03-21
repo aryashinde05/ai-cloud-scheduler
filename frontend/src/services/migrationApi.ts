@@ -177,22 +177,22 @@ export const migrationApi = {
   async createProject(data: {
     organization_name: string;
   }): Promise<MigrationProject> {
-    const response = await api.post('/api/v1/api/migrations/projects', data);
+    const response = await api.post('/api/migrations/projects', data);
     return response.data;
   },
 
   async getProject(projectId: string): Promise<MigrationProject> {
-    const response = await api.get(`/api/v1/api/migrations/projects/${projectId}`);
+    const response = await api.get(`/api/migrations/projects/${projectId}`);
     return response.data;
   },
 
   async listProjects(): Promise<MigrationProject[]> {
-    const response = await api.get('/api/v1/api/migrations/projects');
+    const response = await api.get('/api/migrations/projects');
     return response.data;
   },
 
   async updateProject(projectId: string, data: Partial<MigrationProject>): Promise<MigrationProject> {
-    const response = await api.put(`/api/v1/api/migrations/projects/${projectId}`, data);
+    const response = await api.put(`/api/migrations/projects/${projectId}`, data);
     return response.data;
   },
 
@@ -201,7 +201,14 @@ export const migrationApi = {
     projectId: string,
     profile: OrganizationProfile
   ): Promise<void> {
-    await api.post(`/api/v1/api/migrations/${projectId}/assessment/organization`, profile);
+    // Backend validators expect lowercase enum values
+    const payload = {
+      ...profile,
+      company_size: profile.company_size?.toLowerCase(),
+      current_infrastructure: profile.current_infrastructure?.toLowerCase(),
+      cloud_experience_level: profile.cloud_experience_level?.toLowerCase(),
+    };
+    await api.post(`/api/migrations/${projectId}/assessment/organization`, payload);
   },
 
   async submitWorkloadProfile(
@@ -214,7 +221,7 @@ export const migrationApi = {
       application_type: "Web Application",
       ...workload
     };
-    await api.post(`/api/v1/api/migrations/${projectId}/workloads`, workloadData);
+    await api.post(`/api/migrations/${projectId}/workloads`, workloadData);
   },
 
   async submitRequirements(
@@ -227,11 +234,24 @@ export const migrationApi = {
     }
   ): Promise<void> {
     // Submit each requirement type separately as the backend expects
+    // Backend expects lowercase cost_optimization_priority
+    const budgetPayload = {
+      ...requirements.budget,
+      cost_optimization_priority: requirements.budget.cost_optimization_priority?.toLowerCase(),
+    };
+    // Backend PerformanceRequirementsRequest uses different field names for RTO/RPO
+    const perfPayload = {
+      availability_target: requirements.performance.availability_target,
+      disaster_recovery_rto: requirements.performance.disaster_recovery_rto_minutes,
+      disaster_recovery_rpo: requirements.performance.disaster_recovery_rpo_minutes,
+      geographic_distribution: requirements.performance.geographic_distribution,
+      latency_requirements: { latency_target_ms: requirements.performance.latency_target_ms },
+    };
     await Promise.all([
-      api.post(`/api/v1/api/migrations/${projectId}/performance-requirements`, requirements.performance),
-      api.post(`/api/v1/api/migrations/${projectId}/compliance-requirements`, requirements.compliance),
-      api.post(`/api/v1/api/migrations/${projectId}/budget-constraints`, requirements.budget),
-      api.post(`/api/v1/api/migrations/${projectId}/technical-requirements`, requirements.technical),
+      api.post(`/api/migrations/${projectId}/performance-requirements`, perfPayload),
+      api.post(`/api/migrations/${projectId}/compliance-requirements`, requirements.compliance),
+      api.post(`/api/migrations/${projectId}/budget-constraints`, budgetPayload),
+      api.post(`/api/migrations/${projectId}/technical-requirements`, requirements.technical),
     ]);
   },
 
@@ -244,12 +264,12 @@ export const migrationApi = {
     try {
       // Check each component individually since there's no single status endpoint
       const [orgCheck, workloadCheck, perfCheck, complianceCheck, budgetCheck, techCheck] = await Promise.allSettled([
-        api.get(`/api/v1/api/migrations/${projectId}/assessment/organization`),
-        api.get(`/api/v1/api/migrations/${projectId}/workloads`),
-        api.get(`/api/v1/api/migrations/${projectId}/performance-requirements`),
-        api.get(`/api/v1/api/migrations/${projectId}/compliance-requirements`),
-        api.get(`/api/v1/api/migrations/${projectId}/budget-constraints`),
-        api.get(`/api/v1/api/migrations/${projectId}/technical-requirements`),
+        api.get(`/api/migrations/${projectId}/assessment/organization`),
+        api.get(`/api/migrations/${projectId}/workloads`),
+        api.get(`/api/migrations/${projectId}/performance-requirements`),
+        api.get(`/api/migrations/${projectId}/compliance-requirements`),
+        api.get(`/api/migrations/${projectId}/budget-constraints`),
+        api.get(`/api/migrations/${projectId}/technical-requirements`),
       ]);
 
       const organization_complete = orgCheck.status === 'fulfilled';
@@ -282,20 +302,59 @@ export const migrationApi = {
   },
 
   // Recommendations
-  async generateRecommendations(projectId: string): Promise<ProviderRecommendation[]> {
-    const response = await api.post(`/api/v1/api/migrations/${projectId}/recommendations/generate`);
+  async generateRecommendations(projectId: string, requirementsData?: any): Promise<ProviderRecommendation[]> {
+    // Backend requires required_services and target_monthly_budget in the body
+    const body = {
+      required_services: requirementsData?.technical?.required_services || ['Compute', 'Storage', 'Database'],
+      target_monthly_budget: requirementsData?.budget?.target_monthly_cost || 4000,
+      compliance_requirements: requirementsData?.compliance?.regulatory_frameworks || [],
+      source_infrastructure: 'on_premises',
+      providers: ['aws', 'gcp', 'azure'],
+    };
+    const response = await api.post(`/api/migrations/${projectId}/recommendations/generate`, body);
     
     // Handle new response format with metadata
     if (response.data.recommendations) {
       return response.data.recommendations;
     }
-    
+    if (response.data.primary_recommendation) {
+      // Convert RecommendationReportResponse to ProviderRecommendation[]
+      const report = response.data;
+      return [
+        {
+          provider: report.primary_recommendation.provider,
+          overall_score: report.primary_recommendation.overall_score,
+          service_score: report.primary_recommendation.overall_score,
+          cost_score: report.primary_recommendation.overall_score,
+          compliance_score: report.primary_recommendation.overall_score,
+          performance_score: report.primary_recommendation.overall_score,
+          migration_complexity_score: report.primary_recommendation.overall_score,
+          strengths: report.primary_recommendation.strengths,
+          weaknesses: report.primary_recommendation.weaknesses,
+          estimated_monthly_cost: report.primary_recommendation.estimated_monthly_cost || 0,
+          confidence_score: report.primary_recommendation.confidence_score,
+        },
+        ...report.alternative_recommendations.map((alt: any) => ({
+          provider: alt.provider,
+          overall_score: alt.overall_score,
+          service_score: alt.overall_score,
+          cost_score: alt.overall_score,
+          compliance_score: alt.overall_score,
+          performance_score: alt.overall_score,
+          migration_complexity_score: alt.overall_score,
+          strengths: alt.strengths,
+          weaknesses: alt.weaknesses,
+          estimated_monthly_cost: alt.estimated_monthly_cost || 0,
+          confidence_score: alt.confidence_score,
+        })),
+      ];
+    }
     // Fallback for old response format
-    return response.data;
+    return Array.isArray(response.data) ? response.data : [];
   },
 
   async getRecommendations(projectId: string): Promise<ProviderRecommendation[]> {
-    const response = await api.get(`/api/v1/api/migrations/${projectId}/recommendations`);
+    const response = await api.get(`/api/migrations/${projectId}/recommendations`);
     
     // Handle response format (could be array or object with recommendations)
     if (Array.isArray(response.data)) {
@@ -326,7 +385,7 @@ export const migrationApi = {
       migration_complexity_weight: number;
     }
   ): Promise<ProviderRecommendation[]> {
-    const response = await api.put(`/api/v1/api/migrations/${projectId}/recommendations/weights`, weights);
+    const response = await api.put(`/api/migrations/${projectId}/recommendations/weights`, weights);
     return response.data;
   },
 
@@ -334,7 +393,7 @@ export const migrationApi = {
     providers: string[];
     comparison_matrix: Record<string, any>;
   }> {
-    const response = await api.get(`/api/v1/api/migrations/${projectId}/recommendations/comparison`);
+    const response = await api.get(`/api/migrations/${projectId}/recommendations/comparison`);
     return response.data;
   },
 
@@ -343,14 +402,14 @@ export const migrationApi = {
     projectId: string,
     selectedProvider: string
   ): Promise<MigrationPlan> {
-    const response = await api.post(`/api/v1/api/migrations/${projectId}/plan`, {
+    const response = await api.post(`/api/migrations/${projectId}/plan`, {
       selected_provider: selectedProvider,
     });
     return response.data;
   },
 
   async getMigrationPlan(projectId: string): Promise<MigrationPlan> {
-    const response = await api.get(`/api/v1/api/migrations/${projectId}/plan`);
+    const response = await api.get(`/api/migrations/${projectId}/plan`);
     return response.data;
   },
 
@@ -359,7 +418,7 @@ export const migrationApi = {
     phaseId: string,
     status: string
   ): Promise<void> {
-    await api.put(`/api/v1/api/migrations/${projectId}/plan/phases/${phaseId}/status`, { status });
+    await api.put(`/api/migrations/${projectId}/plan/phases/${phaseId}/status`, { status });
   },
 
   async getMigrationProgress(projectId: string): Promise<{
@@ -368,7 +427,7 @@ export const migrationApi = {
     total_phases: number;
     current_phase: string;
   }> {
-    const response = await api.get(`/api/v1/api/migrations/${projectId}/plan/progress`);
+    const response = await api.get(`/api/migrations/${projectId}/plan/progress`);
     return response.data;
   },
 
@@ -378,7 +437,7 @@ export const migrationApi = {
     provider: string,
     credentials: any
   ): Promise<CloudResource[]> {
-    const response = await api.post(`/api/v1/api/migrations/${projectId}/resources/discover`, {
+    const response = await api.post(`/api/migrations/${projectId}/resources/discover`, {
       provider,
       credentials,
     });
@@ -389,11 +448,11 @@ export const migrationApi = {
     projectId: string,
     structure: OrganizationalStructure
   ): Promise<void> {
-    await api.post(`/api/v1/api/migrations/${projectId}/resources/organize`, structure);
+    await api.post(`/api/migrations/${projectId}/resources/organize`, structure);
   },
 
   async getResources(projectId: string): Promise<CloudResource[]> {
-    const response = await api.get(`/api/v1/api/migrations/${projectId}/resources`);
+    const response = await api.get(`/api/migrations/${projectId}/resources`);
     return response.data;
   },
 
@@ -407,7 +466,7 @@ export const migrationApi = {
       cost_center?: string;
     }
   ): Promise<void> {
-    await api.put(`/api/v1/api/migrations/${projectId}/resources/${resourceId}/categorize`, categorization);
+    await api.put(`/api/migrations/${projectId}/resources/${resourceId}/categorize`, categorization);
   },
 
   // Dimensional Management
@@ -438,26 +497,26 @@ export const migrationApi = {
 
   // Integration & Reports
   async integrateFinOps(projectId: string): Promise<void> {
-    await api.post(`/api/v1/api/migrations/${projectId}/integration/finops`);
+    await api.post(`/api/migrations/${projectId}/integration/finops`);
   },
 
   async captureBaselines(projectId: string): Promise<void> {
-    await api.post(`/api/v1/api/migrations/${projectId}/integration/baselines`);
+    await api.post(`/api/migrations/${projectId}/integration/baselines`);
   },
 
   async getMigrationReport(projectId: string): Promise<MigrationReport> {
-    const response = await api.get(`/api/v1/api/migrations/${projectId}/reports/final`);
+    const response = await api.get(`/api/migrations/${projectId}/reports/final`);
     return response.data;
   },
 
   // Additional methods for new UI components
   async getOrganizationalStructure(projectId: string): Promise<OrganizationalStructure> {
-    const response = await api.get(`/api/v1/api/migrations/${projectId}/resources/structure`);
+    const response = await api.get(`/api/migrations/${projectId}/resources/structure`);
     return response.data;
   },
 
   async getResourceHierarchy(projectId: string): Promise<any[]> {
-    const response = await api.get(`/api/v1/api/migrations/${projectId}/resources/hierarchy`);
+    const response = await api.get(`/api/migrations/${projectId}/resources/hierarchy`);
     return response.data;
   },
 
@@ -470,14 +529,14 @@ export const migrationApi = {
       project?: string;
     }
   ): Promise<void> {
-    await api.post(`/api/v1/api/migrations/${projectId}/resources/categorize-bulk`, {
+    await api.post(`/api/migrations/${projectId}/resources/categorize-bulk`, {
       resource_ids: resourceIds,
       categorization,
     });
   },
 
   async generateInventoryReport(projectId: string, config: any): Promise<any> {
-    const response = await api.post(`/api/v1/api/migrations/${projectId}/reports/inventory`, config);
+    const response = await api.post(`/api/migrations/${projectId}/reports/inventory`, config);
     return response.data;
   },
 
@@ -494,22 +553,22 @@ export const migrationApi = {
       weights?: any;
     }>;
   }> {
-    const response = await api.get(`/api/v1/api/migrations/${projectId}/scenarios`);
+    const response = await api.get(`/api/migrations/${projectId}/scenarios`);
     return response.data;
   },
 
   async getScenarioDetails(projectId: string, scenarioId: string): Promise<any> {
-    const response = await api.get(`/api/v1/api/migrations/${projectId}/scenarios/${scenarioId}`);
+    const response = await api.get(`/api/migrations/${projectId}/scenarios/${scenarioId}`);
     return response.data;
   },
 
   async activateScenario(projectId: string, scenarioId: string): Promise<any> {
-    const response = await api.post(`/api/v1/api/migrations/${projectId}/scenarios/${scenarioId}/activate`);
+    const response = await api.post(`/api/migrations/${projectId}/scenarios/${scenarioId}/activate`);
     return response.data;
   },
 
   async compareScenarios(projectId: string, scenarioIds: string[]): Promise<any> {
-    const response = await api.post(`/api/v1/api/migrations/${projectId}/scenarios/compare`, {
+    const response = await api.post(`/api/migrations/${projectId}/scenarios/compare`, {
       scenario_ids: scenarioIds
     });
     return response.data;
@@ -528,7 +587,7 @@ export const migrationApi = {
     recommendations: ProviderRecommendation[];
     scenario_id: string;
   }> {
-    const response = await api.put(`/api/v1/api/migrations/${projectId}/assessment/modify`, modifications);
+    const response = await api.put(`/api/migrations/${projectId}/assessment/modify`, modifications);
     return response.data;
   },
 };

@@ -26,9 +26,9 @@ const Home: React.FC = () => {
     const navigate = useNavigate();
     const { isAuthenticated, loading } = useAuth();
 
-    // Redirect logged-in users straight to the dashboard
+    // Redirect logged-in users to the service selection page
     if (!loading && isAuthenticated) {
-        return <Navigate to="/dashboard" replace />;
+        return <Navigate to="/select" replace />;
     }
 
     const menuItems = [

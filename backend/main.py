@@ -49,6 +49,20 @@ from app.api.scaling_rules_endpoints import router as scaling_rules_router
 from app.services.ai_services_documentation import router as ai_services_docs_router
 from app.api.aws_simple_endpoints import router as aws_simple_router
 
+# Migration Advisor routers
+try:
+    from app.services.migration_advisor.migration_advisor.assessment_endpoints import router as migration_assessment_router
+    from app.services.migration_advisor.migration_advisor.requirements_endpoints import router as migration_requirements_router
+    from app.services.migration_advisor.migration_advisor.recommendation_endpoints import router as migration_recommendation_router
+    from app.services.migration_advisor.migration_advisor.migration_planning_endpoints import router as migration_planning_router
+    _migration_routers_loaded = True
+except Exception as _e:
+    _migration_routers_loaded = False
+    migration_assessment_router = None
+    migration_requirements_router = None
+    migration_recommendation_router = None
+    migration_planning_router = None
+
 # Structured logging config
 structlog.configure(
     processors=[
@@ -228,6 +242,13 @@ app.include_router(scheduler_router, prefix="/api")
 app.include_router(scaling_rules_router, prefix="/api/v1")
 app.include_router(resources_router)
 app.include_router(ai_services_docs_router)
+
+# Migration Advisor
+if _migration_routers_loaded:
+    app.include_router(migration_assessment_router, prefix="/api")
+    app.include_router(migration_requirements_router, prefix="/api")
+    app.include_router(migration_recommendation_router, prefix="/api")
+    app.include_router(migration_planning_router, prefix="/api")
 
 
 # Root endpoint

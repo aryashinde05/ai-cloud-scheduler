@@ -36,7 +36,9 @@ def get_supabase():
 
 
 def get_db_session():
-    return get_supabase()
+    """SQLAlchemy session dependency — used by migration advisor endpoints."""
+    from app.database.session import get_db as _get_db
+    yield from _get_db()
 
 
 def get_db():

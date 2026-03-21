@@ -11,6 +11,7 @@ import {
   Box,
   Divider,
   Chip,
+  Tooltip,
 } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
@@ -23,13 +24,13 @@ import {
   AttachMoney as MoneyIcon,
   EventNote as SchedulerIcon,
   Assessment as ReportsIcon,
-  Home as HomeIcon,
   AutoMode as AutoScaleIcon,
   Link as LinkIcon,
   Insights as InsightsIcon,
   Savings as SavingsIcon,
   Storage as AwsIcon,
   Cloud as AzureIcon,
+  AppsOutlined as AppsIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 280;
@@ -49,7 +50,6 @@ interface MenuSection {
 const menuSections: MenuSection[] = [
   {
     items: [
-      { text: 'Home', icon: <HomeIcon />, path: '/' },
       { text: 'Dashboard', icon: <DashboardIcon />, path: '/dashboard' },
     ],
   },
@@ -119,7 +119,7 @@ const Sidebar: React.FC = () => {
     >
       {/* Logo Section */}
       <Box
-        onClick={() => navigate('/')}
+        onClick={() => navigate('/select')}
         sx={{
           p: 3,
           display: 'flex',
@@ -143,6 +143,31 @@ const Sidebar: React.FC = () => {
       </Box>
 
       <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.1)' }} />
+
+      {/* Back to services */}
+      <Box sx={{ px: 2, pt: 1.5 }}>
+        <Tooltip title="Return to service selection" placement="right">
+          <ListItemButton
+            onClick={() => navigate('/select')}
+            sx={{
+              borderRadius: 2,
+              mb: 0.5,
+              color: 'text.secondary',
+              '&:hover': { bgcolor: 'rgba(255,255,255,0.05)', color: 'white' },
+            }}
+          >
+            <ListItemIcon sx={{ color: 'inherit', minWidth: 40 }}>
+              <AppsIcon fontSize="small" />
+            </ListItemIcon>
+            <ListItemText
+              primary="All Services"
+              primaryTypographyProps={{ fontSize: '0.85rem' }}
+            />
+          </ListItemButton>
+        </Tooltip>
+      </Box>
+
+      <Divider sx={{ borderColor: 'rgba(255, 255, 255, 0.06)', mx: 2 }} />
 
       {/* Navigation Menu */}
       <List sx={{ px: 2, py: 1 }}>
