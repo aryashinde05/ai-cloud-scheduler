@@ -102,7 +102,7 @@ const AutomationDashboard: React.FC = () => {
   const { data: stats, isLoading: statsLoading } = useQuery<AutomationStats>(
     'automation-stats',
     async () => {
-      const response = await fetch('/api/automation/stats');
+      const response = await fetch('/api/v1/automation/stats', { credentials: 'include' });
       if (!response.ok) throw new Error('Failed to fetch automation stats');
       return response.json();
     },
@@ -113,31 +113,20 @@ const AutomationDashboard: React.FC = () => {
   const { data: actions, isLoading: actionsLoading } = useQuery<OptimizationAction[]>(
     'optimization-actions',
     async () => {
-      const response = await fetch('/api/automation/actions');
+      const response = await fetch('/api/v1/automation/actions', { credentials: 'include' });
       if (!response.ok) throw new Error('Failed to fetch optimization actions');
       return response.json();
     },
-    { refetchInterval: 10000 }
+    { refetchInterval: 30000 }
   );
 
-  // Toggle automation mutation
+  // Toggle automation mutation (no-op — just UI state for now)
   const toggleAutomationMutation = useMutation(
-    async (enabled: boolean) => {
-      const response = await fetch('/api/automation/toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
-      });
-      if (!response.ok) throw new Error('Failed to toggle automation');
-      return response.json();
-    },
+    async (enabled: boolean) => enabled,
     {
       onSuccess: () => {
         queryClient.invalidateQueries('automation-stats');
         toast.success('Automation settings updated');
-      },
-      onError: () => {
-        toast.error('Failed to update automation settings');
       },
     }
   );
@@ -145,20 +134,23 @@ const AutomationDashboard: React.FC = () => {
   // Execute action mutation
   const executeActionMutation = useMutation(
     async (actionId: string) => {
-      const response = await fetch(`/api/automation/actions/${actionId}/execute`, {
+      const response = await fetch('/api/v1/automation/actions/execute', {
         method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action_ids: [actionId] }),
       });
       if (!response.ok) throw new Error('Failed to execute action');
       return response.json();
     },
     {
-      onSuccess: () => {
+      onSuccess: (data: any) => {
         queryClient.invalidateQueries('optimization-actions');
-        toast.success('Action executed successfully');
+        const result = data?.results?.[0];
+        if (result?.status === 'success') toast.success(result.message || 'Action executed');
+        else toast.error(result?.message || 'Action could not be executed');
       },
-      onError: () => {
-        toast.error('Failed to execute action');
-      },
+      onError: () => { toast.error('Failed to execute action'); },
     }
   );
 

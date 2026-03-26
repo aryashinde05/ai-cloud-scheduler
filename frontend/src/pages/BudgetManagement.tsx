@@ -35,7 +35,7 @@ import {
   Delete,
   Warning,
   CheckCircle,
-  Error,
+  Error as MuiError,
   Notifications,
   CloudOff,
 } from '@mui/icons-material';
@@ -77,15 +77,13 @@ const BudgetManagement: React.FC = () => {
   const loadBudgets = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:8000/api/budgets');
-      const data = await response.json();
-
-      if (data.error === 'no_aws_account') {
-        setNoAws(true);
-        setLoading(false);
-        return;
+      const response = await fetch('/api/v1/aws/budgets', { credentials: 'include' });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        if (response.status === 400) { setNoAws(true); setLoading(false); return; }
+        throw new window.Error(err.detail || 'Failed to load budgets');
       }
-
+      const data = await response.json();
       setBudgets(data.budgets || []);
       setLoading(false);
     } catch (error) {
@@ -94,6 +92,37 @@ const BudgetManagement: React.FC = () => {
     }
   };
 
+  const handleCreateBudget = async () => {
+    try {
+      const res = await fetch('/api/v1/aws/budgets', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newBudget),
+      });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new window.Error(errorData.detail || 'Failed');
+      }
+      setCreateDialogOpen(false);
+      setNewBudget({ name: '', amount: '', period: 'monthly', team: '', alerts: [75, 90] });
+      loadBudgets();
+    } catch (e: any) {
+      console.error('Create budget error:', e);
+    }
+  };
+
+  const handleDeleteBudget = async (budgetId: string) => {
+    try {
+      await fetch(`/api/v1/aws/budgets/${encodeURIComponent(budgetId)}`, {
+        method: 'DELETE', credentials: 'include',
+      });
+      loadBudgets();
+    } catch (e) {
+      console.error('Delete budget error:', e);
+    }
+  };
+  
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'good': return '#4caf50';
@@ -107,24 +136,14 @@ const BudgetManagement: React.FC = () => {
     switch (status) {
       case 'good': return <CheckCircle sx={{ color: '#4caf50', fontSize: 20 }} />;
       case 'warning': return <Warning sx={{ color: '#ff9800', fontSize: 20 }} />;
-      case 'critical': return <Error sx={{ color: '#f44336', fontSize: 20 }} />;
+      case 'critical': return <MuiError sx={{ color: '#f44336', fontSize: 20 }} />;
       default: return <CheckCircle sx={{ color: '#9e9e9e', fontSize: 20 }} />;
     }
-  };
-
-  const handleCreateBudget = () => {
-    console.log('Creating budget:', newBudget);
-    setCreateDialogOpen(false);
-    setNewBudget({ name: '', amount: '', period: 'monthly', team: '', alerts: [75, 90] });
   };
 
   const handleEditBudget = (budget: any) => {
     setSelectedBudget(budget);
     setEditDialogOpen(true);
-  };
-
-  const handleDeleteBudget = (budgetId: string) => {
-    console.log('Deleting budget:', budgetId);
   };
 
   if (loading) {

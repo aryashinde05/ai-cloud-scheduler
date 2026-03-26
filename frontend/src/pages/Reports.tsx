@@ -72,16 +72,41 @@ const Reports: React.FC = () => {
   const loadReports = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:8000/api/reports');
-      const data = await response.json();
-
-      if (data.error === 'no_aws_account') {
-        setNoAws(true);
-        setLoading(false);
-        return;
+      const [summaryRes, oppsRes, inventoryRes] = await Promise.all([
+        fetch('/api/v1/reports/summary', { credentials: 'include' }),
+        fetch('/api/v1/reports/optimization-opportunities', { credentials: 'include' }),
+        fetch('/api/v1/reports/resource-inventory', { credentials: 'include' }),
+      ]);
+      if (!summaryRes.ok) {
+        const err = await summaryRes.json().catch(() => ({}));
+        if (summaryRes.status === 400) { setNoAws(true); setLoading(false); return; }
+        throw new Error(err.detail || 'Failed');
       }
-
-      setReports(data.reports || []);
+      const summary = await summaryRes.json();
+      const opps = await oppsRes.json().catch(() => ({ opportunities: [] }));
+      const inventory = await inventoryRes.json().catch(() => ({}));
+      // Build a synthetic "reports" list from real data
+      const syntheticReports = [
+        {
+          id: 'cost-summary', name: 'Cost Summary', type: 'cost_summary',
+          schedule: 'on-demand', status: 'active', format: 'Live',
+          lastRun: summary.data_freshness, nextRun: null,
+          data: summary,
+        },
+        {
+          id: 'optimization', name: 'Optimization Opportunities', type: 'optimization',
+          schedule: 'on-demand', status: 'active', format: 'Live',
+          lastRun: summary.data_freshness, nextRun: null,
+          data: opps,
+        },
+        {
+          id: 'inventory', name: 'Resource Inventory', type: 'inventory',
+          schedule: 'on-demand', status: 'active', format: 'Live',
+          lastRun: summary.data_freshness, nextRun: null,
+          data: inventory,
+        },
+      ];
+      setReports(syntheticReports);
       setLoading(false);
     } catch (error) {
       console.error('Error loading reports:', error);
@@ -90,17 +115,23 @@ const Reports: React.FC = () => {
   };
 
   const handleCreateReport = () => {
-    console.log('Creating report:', newReport);
     setCreateDialogOpen(false);
     setNewReport({ name: '', type: '', schedule: 'monthly', recipients: '', format: 'PDF' });
   };
 
-  const handleDownloadReport = (reportId: number) => {
-    console.log('Downloading report:', reportId);
+  const handleDownloadReport = (reportId: string) => {
+    // Open the relevant API endpoint in a new tab for download
+    const urlMap: Record<string, string> = {
+      'cost-summary': '/api/v1/reports/summary',
+      'optimization': '/api/v1/reports/optimization-opportunities',
+      'inventory': '/api/v1/reports/resource-inventory',
+    };
+    const url = urlMap[reportId];
+    if (url) window.open(url, '_blank');
   };
 
-  const handleDeleteReport = (reportId: number) => {
-    console.log('Deleting report:', reportId);
+  const handleDeleteReport = (reportId: string) => {
+    setReports(prev => prev.filter(r => r.id !== reportId));
   };
 
   const getStatusColor = (status: string) => {

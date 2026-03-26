@@ -165,22 +165,59 @@ class AzurePricingClient(BasePricingClient):
     ) -> List[ComputePricing]:
         """
         Get Virtual Machine pricing from Azure Retail Prices API.
-        
-        Args:
-            region: Azure region
-            instance_type: Specific VM size (e.g., 'Standard_B1s')
-            operating_system: OS type ('linux', 'windows')
-            filters: Additional filters
-            
-        Returns:
-            List[ComputePricing]: VM pricing information
         """
         try:
             logger.info(f"Fetching Azure VM pricing for region {region}")
             
-            # For demo purposes, use mock data
-            pricing_data = await self._get_mock_vm_pricing(region, instance_type, operating_system)
+            query_filters = [
+                f"serviceName eq 'Virtual Machines'",
+                f"armRegionName eq '{region}'",
+                f"type eq 'Consumption'"
+            ]
             
+            if instance_type:
+                query_filters.append(f"armSkuName eq '{instance_type}'")
+                
+            params = {
+                "$filter": " and ".join(query_filters),
+                "currencyCode": "USD"
+            }
+            
+            data = await self._make_request(self.BASE_URL, params)
+            pricing_data = []
+            
+            for item in data.get('Items', []):
+                if item.get('unitOfMeasure') != '1 Hour':
+                    continue
+                
+                prod_name = item.get('productName', '')
+                if operating_system.lower() == 'windows':
+                    if 'Windows' not in prod_name:
+                        continue
+                else:
+                    if 'Windows' in prod_name:
+                        continue
+                
+                sku = item.get('armSkuName', item.get('skuName', 'Unknown'))
+                price = Decimal(str(item.get('retailPrice', 0)))
+                
+                pricing = ComputePricing(
+                    instance_type=sku,
+                    vcpus=0, # Azure Retail Prices API doesn't return vcpu/memory
+                    memory_gb=0.0,
+                    price_per_hour=price,
+                    price_per_month=price * Decimal("730"),
+                    operating_system=operating_system,
+                    region=region,
+                    currency=item.get('currencyCode', 'USD'),
+                    architecture="x86_64",
+                    additional_specs={
+                        'productName': item.get('productName'),
+                        'meterName': item.get('meterName')
+                    }
+                )
+                pricing_data.append(pricing)
+                
             return pricing_data
             
         except Exception as e:
@@ -196,31 +233,48 @@ class AzurePricingClient(BasePricingClient):
     ) -> List[StoragePricing]:
         """
         Get Azure Storage pricing from Retail Prices API.
-        
-        Args:
-            region: Azure region
-            storage_type: Type of storage ('object', 'block')
-            storage_class: Storage tier ('hot', 'cool', 'archive')
-            filters: Additional filters
-            
-        Returns:
-            List[StoragePricing]: Storage pricing information
         """
         try:
             logger.info(f"Fetching Azure storage pricing for region {region}")
             
+            query_filters = [
+                f"serviceFamily eq 'Storage'",
+                f"armRegionName eq '{region}'"
+            ]
+            
+            params = {
+                "$filter": " and ".join(query_filters),
+                "currencyCode": "USD"
+            }
+            
+            data = await self._make_request(self.BASE_URL, params)
             pricing_data = []
             
-            # Get Blob Storage pricing (object storage)
-            if not storage_type or storage_type == "object":
-                blob_pricing = await self._get_mock_blob_storage_pricing(region, storage_class)
-                pricing_data.extend(blob_pricing)
-            
-            # Get Managed Disk pricing (block storage)
-            if not storage_type or storage_type == "block":
-                disk_pricing = await self._get_mock_managed_disk_pricing(region)
-                pricing_data.extend(disk_pricing)
-            
+            for item in data.get('Items', []):
+                if 'GB/Month' not in item.get('unitOfMeasure', ''):
+                    continue
+                    
+                sku = item.get('armSkuName', item.get('skuName', 'Unknown'))
+                price = Decimal(str(item.get('retailPrice', 0)))
+                
+                # Try to infer storage type
+                stype = "block" if "Disk" in item.get('productName', '') else "object"
+                if storage_type and storage_type != stype:
+                    continue
+                    
+                pricing = StoragePricing(
+                    storage_type=stype,
+                    price_per_gb_month=price,
+                    region=region,
+                    currency=item.get('currencyCode', 'USD'),
+                    storage_class=sku,
+                    additional_specs={
+                        'productName': item.get('productName'),
+                        'meterName': item.get('meterName')
+                    }
+                )
+                pricing_data.append(pricing)
+                
             return pricing_data
             
         except Exception as e:
@@ -235,35 +289,55 @@ class AzurePricingClient(BasePricingClient):
     ) -> List[NetworkPricing]:
         """
         Get Azure network service pricing.
-        
-        Args:
-            region: Azure region
-            service_type: Network service type
-            filters: Additional filters
-            
-        Returns:
-            List[NetworkPricing]: Network pricing information
         """
         try:
             logger.info(f"Fetching Azure network pricing for region {region}")
             
+            query_filters = [
+                f"serviceFamily eq 'Networking'",
+                f"armRegionName eq '{region}'"
+            ]
+            
+            params = {
+                "$filter": " and ".join(query_filters),
+                "currencyCode": "USD"
+            }
+            
+            data = await self._make_request(self.BASE_URL, params)
             pricing_data = []
             
-            # Data transfer pricing
-            if not service_type or service_type == "data_transfer":
-                dt_pricing = await self._get_mock_data_transfer_pricing(region)
-                pricing_data.extend(dt_pricing)
-            
-            # Load balancer pricing
-            if not service_type or service_type == "load_balancer":
-                lb_pricing = await self._get_mock_load_balancer_pricing(region)
-                pricing_data.extend(lb_pricing)
-            
-            # CDN pricing
-            if not service_type or service_type == "cdn":
-                cdn_pricing = await self._get_mock_cdn_pricing()
-                pricing_data.extend(cdn_pricing)
-            
+            for item in data.get('Items', []):
+                sku = item.get('armSkuName', item.get('skuName', 'Unknown'))
+                price = Decimal(str(item.get('retailPrice', 0)))
+                unit = item.get('unitOfMeasure', '')
+                
+                # Simple heuristic to divide network types
+                if 'GB' in unit:
+                    # Data Transfer
+                    if service_type and service_type != "data_transfer":
+                        continue
+                    pricing = NetworkPricing(
+                        service_type="data_transfer",
+                        price_per_gb=price,
+                        region=region,
+                        currency=item.get('currencyCode', 'USD'),
+                        transfer_type="outbound" if "Outbound" in item.get('meterName', '') else "inbound",
+                        additional_specs={'productName': item.get('productName')}
+                    )
+                    pricing_data.append(pricing)
+                elif 'Hour' in unit:
+                    # Load Balancer or similar hourly charges
+                    if service_type and service_type != "load_balancer":
+                        continue
+                    pricing = NetworkPricing(
+                        service_type="load_balancer",
+                        price_per_hour=price,
+                        region=region,
+                        currency=item.get('currencyCode', 'USD'),
+                        additional_specs={'productName': item.get('productName')}
+                    )
+                    pricing_data.append(pricing)
+                    
             return pricing_data
             
         except Exception as e:
@@ -279,346 +353,63 @@ class AzurePricingClient(BasePricingClient):
     ) -> List[DatabasePricing]:
         """
         Get Azure SQL Database pricing from Retail Prices API.
-        
-        Args:
-            region: Azure region
-            database_type: Database service type
-            instance_class: Service tier
-            filters: Additional filters
-            
-        Returns:
-            List[DatabasePricing]: Database pricing information
         """
         try:
             logger.info(f"Fetching Azure SQL pricing for region {region}")
             
-            pricing_data = await self._get_mock_sql_database_pricing(region, database_type, instance_class)
+            query_filters = [
+                f"serviceFamily eq 'Databases'",
+                f"armRegionName eq '{region}'"
+            ]
+            
+            params = {
+                "$filter": " and ".join(query_filters),
+                "currencyCode": "USD"
+            }
+            
+            data = await self._make_request(self.BASE_URL, params)
+            pricing_data = []
+            
+            for item in data.get('Items', []):
+                if item.get('unitOfMeasure') != '1 Hour':
+                    continue
+                    
+                sku = item.get('armSkuName', item.get('skuName', 'Unknown'))
+                price = Decimal(str(item.get('retailPrice', 0)))
+                
+                # Try to extract engine
+                prod_name = item.get('productName', '').lower()
+                engine = "sqlserver"
+                if "mysql" in prod_name:
+                    engine = "mysql"
+                elif "postgresql" in prod_name:
+                    engine = "postgresql"
+                
+                if database_type and engine != database_type.lower():
+                    continue
+                    
+                pricing = DatabasePricing(
+                    database_type=engine,
+                    instance_class=sku,
+                    price_per_hour=price,
+                    storage_price_per_gb_month=Decimal("0"), # Needs separate query for storage
+                    region=region,
+                    currency=item.get('currencyCode', 'USD'),
+                    engine_version=f"{engine}-latest",
+                    multi_az=False,
+                    backup_storage_price=Decimal("0"),
+                    additional_specs={
+                        'productName': item.get('productName'),
+                        'meterName': item.get('meterName')
+                    }
+                )
+                pricing_data.append(pricing)
+                
             return pricing_data
             
         except Exception as e:
             logger.error(f"Failed to get Azure database pricing: {e}")
             raise PricingAPIException(f"Failed to get database pricing: {str(e)}", "azure")
-    
-    # Mock pricing methods
-    
-    async def _get_mock_vm_pricing(
-        self, 
-        region: str, 
-        instance_type: Optional[str], 
-        operating_system: str
-    ) -> List[ComputePricing]:
-        """Get mock Azure VM pricing data."""
-        
-        # Mock Azure VM sizes and pricing
-        vm_sizes = {
-            'Standard_B1s': {'vcpus': 1, 'memory': 1.0, 'price': 0.0104},
-            'Standard_B1ms': {'vcpus': 1, 'memory': 2.0, 'price': 0.0208},
-            'Standard_B2s': {'vcpus': 2, 'memory': 4.0, 'price': 0.0416},
-            'Standard_B2ms': {'vcpus': 2, 'memory': 8.0, 'price': 0.0832},
-            'Standard_B4ms': {'vcpus': 4, 'memory': 16.0, 'price': 0.1664},
-            'Standard_D2s_v3': {'vcpus': 2, 'memory': 8.0, 'price': 0.096},
-            'Standard_D4s_v3': {'vcpus': 4, 'memory': 16.0, 'price': 0.192},
-            'Standard_D8s_v3': {'vcpus': 8, 'memory': 32.0, 'price': 0.384},
-            'Standard_F2s_v2': {'vcpus': 2, 'memory': 4.0, 'price': 0.085},
-            'Standard_F4s_v2': {'vcpus': 4, 'memory': 8.0, 'price': 0.17},
-            'Standard_E2s_v3': {'vcpus': 2, 'memory': 16.0, 'price': 0.126},
-            'Standard_E4s_v3': {'vcpus': 4, 'memory': 32.0, 'price': 0.252}
-        }
-        
-        # Windows pricing is typically higher
-        os_multiplier = 1.9 if operating_system.lower() == 'windows' else 1.0
-        
-        # Regional pricing adjustments
-        region_multipliers = {
-            'eastus': 1.0,
-            'westus2': 1.03,
-            'westeurope': 1.08,
-            'eastasia': 1.12,
-            'japaneast': 1.15
-        }
-        region_multiplier = region_multipliers.get(region, 1.05)
-        
-        pricing_data = []
-        
-        # Filter by VM size if specified
-        if instance_type:
-            if instance_type in vm_sizes:
-                types_to_process = {instance_type: vm_sizes[instance_type]}
-            else:
-                return []
-        else:
-            types_to_process = vm_sizes
-        
-        for vm_size, specs in types_to_process.items():
-            base_price = specs['price'] * os_multiplier * region_multiplier
-            
-            pricing = ComputePricing(
-                instance_type=vm_size,
-                vcpus=specs['vcpus'],
-                memory_gb=specs['memory'],
-                price_per_hour=Decimal(str(base_price)),
-                price_per_month=Decimal(str(base_price * 24 * 30)),
-                operating_system=operating_system,
-                region=region,
-                currency="USD",
-                spot_price_per_hour=Decimal(str(base_price * 0.2)),  # ~80% discount
-                reserved_price_per_hour=Decimal(str(base_price * 0.65)),  # ~35% discount
-                architecture="x86_64",
-                network_performance="Moderate" if 'B' in vm_size else "High",
-                additional_specs={
-                    'platform': 'Azure Virtual Machines',
-                    'premium_storage': True if 's' in vm_size else False,
-                    'accelerated_networking': True
-                }
-            )
-            pricing_data.append(pricing)
-        
-        return pricing_data
-    
-    async def _get_mock_blob_storage_pricing(
-        self, 
-        region: str, 
-        storage_class: Optional[str]
-    ) -> List[StoragePricing]:
-        """Get mock Blob Storage pricing data."""
-        
-        storage_tiers = {
-            'hot': {'price': 0.0184, 'retrieval': 0.0},
-            'cool': {'price': 0.01, 'retrieval': 0.01},
-            'archive': {'price': 0.00099, 'retrieval': 0.02}
-        }
-        
-        # Regional pricing adjustments
-        region_multipliers = {
-            'eastus': 1.0,
-            'westus2': 1.02,
-            'westeurope': 1.06,
-            'eastasia': 1.09
-        }
-        region_multiplier = region_multipliers.get(region, 1.04)
-        
-        pricing_data = []
-        
-        # Filter by storage tier if specified
-        if storage_class:
-            if storage_class in storage_tiers:
-                tiers_to_process = {storage_class: storage_tiers[storage_class]}
-            else:
-                tiers_to_process = {'hot': storage_tiers['hot']}
-        else:
-            tiers_to_process = storage_tiers
-        
-        for tier_name, specs in tiers_to_process.items():
-            base_price = specs['price'] * region_multiplier
-            
-            pricing = StoragePricing(
-                storage_type="object",
-                price_per_gb_month=Decimal(str(base_price)),
-                region=region,
-                currency="USD",
-                storage_class=tier_name,
-                request_price=Decimal("0.0004"),  # Per 10,000 operations
-                retrieval_price=Decimal(str(specs['retrieval'])) if specs['retrieval'] > 0 else None,
-                minimum_storage_duration=30 if tier_name != 'hot' else None,
-                additional_specs={
-                    'durability': '99.999999999%',
-                    'availability': '99.9%' if tier_name == 'hot' else '99.0%',
-                    'geo_redundancy': True,
-                    'access_tier': tier_name
-                }
-            )
-            pricing_data.append(pricing)
-        
-        return pricing_data
-    
-    async def _get_mock_managed_disk_pricing(self, region: str) -> List[StoragePricing]:
-        """Get mock Managed Disk pricing data."""
-        
-        disk_types = {
-            'Standard_LRS': {'price': 0.04, 'iops_price': 0.0},
-            'StandardSSD_LRS': {'price': 0.075, 'iops_price': 0.0},
-            'Premium_LRS': {'price': 0.135, 'iops_price': 0.0},
-            'UltraSSD_LRS': {'price': 0.125, 'iops_price': 0.0522}
-        }
-        
-        region_multiplier = 1.03 if region != 'eastus' else 1.0
-        
-        pricing_data = []
-        
-        for disk_type, specs in disk_types.items():
-            base_price = specs['price'] * region_multiplier
-            
-            pricing = StoragePricing(
-                storage_type="block",
-                price_per_gb_month=Decimal(str(base_price)),
-                region=region,
-                currency="USD",
-                storage_class=disk_type,
-                iops_price=Decimal(str(specs['iops_price'])) if specs['iops_price'] > 0 else None,
-                additional_specs={
-                    'max_iops': 160000 if disk_type == 'UltraSSD_LRS' else 20000,
-                    'max_throughput': '2000 MB/s' if disk_type == 'UltraSSD_LRS' else '900 MB/s',
-                    'disk_type': disk_type,
-                    'replication': 'LRS'
-                }
-            )
-            pricing_data.append(pricing)
-        
-        return pricing_data
-    
-    async def _get_mock_data_transfer_pricing(self, region: str) -> List[NetworkPricing]:
-        """Get mock data transfer pricing."""
-        
-        pricing_data = [
-            NetworkPricing(
-                service_type="data_transfer",
-                price_per_gb=Decimal("0.087"),
-                region=region,
-                currency="USD",
-                transfer_type="outbound",
-                bandwidth_tier="first_5gb",
-                additional_specs={'description': 'Outbound data transfer (first 5GB free)'}
-            ),
-            NetworkPricing(
-                service_type="data_transfer",
-                price_per_gb=Decimal("0.087"),
-                region=region,
-                currency="USD",
-                transfer_type="outbound",
-                bandwidth_tier="next_10tb",
-                additional_specs={'description': 'Outbound data transfer (next 10TB)'}
-            ),
-            NetworkPricing(
-                service_type="data_transfer",
-                price_per_gb=Decimal("0.0"),
-                region=region,
-                currency="USD",
-                transfer_type="inbound",
-                additional_specs={'description': 'Inbound data transfer'}
-            )
-        ]
-        
-        return pricing_data
-    
-    async def _get_mock_load_balancer_pricing(self, region: str) -> List[NetworkPricing]:
-        """Get mock Load Balancer pricing."""
-        
-        pricing_data = [
-            NetworkPricing(
-                service_type="load_balancer",
-                price_per_hour=Decimal("0.025"),
-                region=region,
-                currency="USD",
-                additional_specs={
-                    'type': 'Application Gateway',
-                    'capacity_unit_price': 0.0144
-                }
-            ),
-            NetworkPricing(
-                service_type="load_balancer",
-                price_per_hour=Decimal("0.025"),
-                region=region,
-                currency="USD",
-                additional_specs={
-                    'type': 'Load Balancer',
-                    'rule_price': 0.025
-                }
-            )
-        ]
-        
-        return pricing_data
-    
-    async def _get_mock_cdn_pricing(self) -> List[NetworkPricing]:
-        """Get mock CDN pricing."""
-        
-        pricing_data = [
-            NetworkPricing(
-                service_type="cdn",
-                price_per_gb=Decimal("0.081"),
-                region="global",
-                currency="USD",
-                transfer_type="outbound",
-                bandwidth_tier="first_10tb",
-                additional_specs={'description': 'Azure CDN data transfer'}
-            ),
-            NetworkPricing(
-                service_type="cdn",
-                price_per_request=Decimal("0.0075"),
-                region="global",
-                currency="USD",
-                additional_specs={'description': 'Azure CDN requests (per 10,000)'}
-            )
-        ]
-        
-        return pricing_data
-    
-    async def _get_mock_sql_database_pricing(
-        self, 
-        region: str, 
-        database_type: Optional[str], 
-        instance_class: Optional[str]
-    ) -> List[DatabasePricing]:
-        """Get mock SQL Database pricing data."""
-        
-        service_tiers = {
-            'Basic': {'price': 0.0067},
-            'Standard_S0': {'price': 0.0200},
-            'Standard_S1': {'price': 0.0400},
-            'Standard_S2': {'price': 0.1200},
-            'Premium_P1': {'price': 0.6250},
-            'Premium_P2': {'price': 1.2500},
-            'GP_Gen5_2': {'price': 0.5616},
-            'GP_Gen5_4': {'price': 1.1232},
-            'BC_Gen5_2': {'price': 1.1232},
-            'BC_Gen5_4': {'price': 2.2464}
-        }
-        
-        database_types = ['sqlserver', 'mysql', 'postgresql']
-        
-        region_multiplier = 1.04 if region != 'eastus' else 1.0
-        
-        pricing_data = []
-        
-        # Filter by database type if specified
-        types_to_process = [database_type] if database_type else database_types
-        
-        # Filter by service tier if specified
-        if instance_class:
-            if instance_class in service_tiers:
-                tiers_to_process = {instance_class: service_tiers[instance_class]}
-            else:
-                tiers_to_process = {'Basic': service_tiers['Basic']}
-        else:
-            tiers_to_process = service_tiers
-        
-        for db_type in types_to_process:
-            for tier, specs in tiers_to_process.items():
-                base_price = specs['price'] * region_multiplier
-                
-                # MySQL and PostgreSQL are only available in certain tiers
-                if db_type in ['mysql', 'postgresql'] and tier.startswith(('Basic', 'Standard', 'Premium')):
-                    continue
-                
-                pricing = DatabasePricing(
-                    database_type=db_type,
-                    instance_class=tier,
-                    price_per_hour=Decimal(str(base_price)),
-                    storage_price_per_gb_month=Decimal("0.125"),
-                    region=region,
-                    currency="USD",
-                    engine_version=f"{db_type}-latest",
-                    multi_az=True if 'Premium' in tier or 'BC_' in tier else False,
-                    backup_storage_price=Decimal("0.10"),
-                    additional_specs={
-                        'service_tier': tier,
-                        'max_storage': '4TB' if 'Basic' in tier else '1TB',
-                        'backup_retention': '35 days',
-                        'point_in_time_restore': True
-                    }
-                )
-                pricing_data.append(pricing)
-        
-        return pricing_data
     
     async def get_supported_regions(self) -> List[str]:
         """Get list of supported Azure regions."""

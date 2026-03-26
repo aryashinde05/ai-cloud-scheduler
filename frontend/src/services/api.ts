@@ -251,12 +251,15 @@ export const apiService = {
     granularity?: string;
     groupBy?: string[];
     filters?: any;
-  }): Promise<{ data: CostData[]; total: number }> {
-    const cacheKey = getCacheKey('/api/v1/costs', params);
+  }): Promise<{ data: any[]; total: number }> {
+    const cacheKey = getCacheKey('/api/v1/aws-cost/cost-trends', params);
     return makeRequest(
       async () => {
-        const response = await api.get('/api/v1/costs', { params });
-        return response.data;
+        const response = await api.get('/api/v1/aws-cost/cost-trends', { params });
+        return {
+          data: response.data.daily_costs || [],
+          total: response.data.total_cost || 0
+        };
       },
       cacheKey,
       DEFAULT_CACHE_TTL
@@ -297,11 +300,11 @@ export const apiService = {
 
   // Budget Management
   async getBudgets(params?: { status?: string; team?: string }): Promise<Budget[]> {
-    const cacheKey = getCacheKey('/api/v1/budgets', params);
+    const cacheKey = getCacheKey('/api/v1/aws/budgets', params);
     return makeRequest(
       async () => {
-        const response = await api.get('/api/v1/budgets', { params });
-        return response.data.budgets;
+        const response = await api.get('/api/v1/aws/budgets', { params });
+        return response.data.budgets || [];
       },
       cacheKey,
       DEFAULT_CACHE_TTL

@@ -7,33 +7,38 @@ scaling rules that automatically adjust AWS resources.
 
 from typing import Dict, List, Optional, Any
 
-from fastapi import APIRouter, HTTPException, status, Query
+import boto3
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.services.scaling_rules_engine import ScalingRulesEngine
+from app.database.session import get_db
+from app.models.aws_account import AwsAccount
 
 router = APIRouter(prefix="/scaling-rules", tags=["Auto-Scaling Rules"])
 
-# Shared engine instance (initialized on first access)
-_engine: Optional[ScalingRulesEngine] = None
 
-
-def get_engine() -> ScalingRulesEngine:
-    """Get or create the shared engine instance."""
-    global _engine
-    if _engine is None:
-        # Try to get AWS session from the existing data service
-        boto3_session = None
-        region = "us-east-1"
-        try:
-            from app.aws.aws_data_service import AWSDataService
-            svc = AWSDataService()
-            boto3_session = svc.session
-            region = svc.region
-        except Exception:
-            pass
-        _engine = ScalingRulesEngine(boto3_session=boto3_session, region=region)
-    return _engine
+def get_engine(db: Session = None) -> ScalingRulesEngine:
+    """Build ScalingRulesEngine using stored AWS credentials if available."""
+    boto3_session = None
+    region = "us-east-1"
+    if db:
+        account = AwsAccount.get_default(db)
+        if account:
+            try:
+                access_key, secret_key, acct_region = account.get_decrypted_credentials()
+                boto3_session = boto3.Session(
+                    aws_access_key_id=access_key,
+                    aws_secret_access_key=secret_key,
+                    region_name=acct_region,
+                )
+                region = acct_region
+            except Exception:
+                pass
+    if boto3_session is None:
+        boto3_session = boto3.Session(region_name=region)
+    return ScalingRulesEngine(boto3_session=boto3_session, region=region)
 
 
 # ── Pydantic Models ────────────────────────────────────────
@@ -119,101 +124,43 @@ class ScalingRuleUpdateRequest(BaseModel):
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
-async def create_scaling_rule(request: ScalingRuleRequest):
+async def create_scaling_rule(request: ScalingRuleRequest, db: Session = Depends(get_db)):
     """Create a new auto-scaling rule."""
-    engine = get_engine()
+    engine = get_engine(db)
     rule = engine.create_rule(request.dict())
     return {"status": "created", "rule": rule}
 
 
 @router.get("")
-async def list_scaling_rules():
+async def list_scaling_rules(db: Session = Depends(get_db)):
     """List all scaling rules."""
-    engine = get_engine()
+    engine = get_engine(db)
     rules = engine.get_rules()
     return {"rules": rules, "total": len(rules)}
 
 
 @router.get("/stats")
-async def get_scaling_stats():
+async def get_scaling_stats(db: Session = Depends(get_db)):
     """Get auto-scaling summary statistics."""
-    engine = get_engine()
+    engine = get_engine(db)
     return engine.get_stats()
 
 
-@router.get("/{rule_id}")
-async def get_scaling_rule(rule_id: str):
-    """Get a specific scaling rule by ID."""
-    engine = get_engine()
-    rule = engine.get_rule(rule_id)
-    if not rule:
-        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
-    return {"rule": rule}
-
-
-@router.put("/{rule_id}")
-async def update_scaling_rule(rule_id: str, request: ScalingRuleUpdateRequest):
-    """Update an existing scaling rule."""
-    engine = get_engine()
-    data = {k: v for k, v in request.dict().items() if v is not None}
-    rule = engine.update_rule(rule_id, data)
-    if not rule:
-        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
-    return {"status": "updated", "rule": rule}
-
-
-@router.delete("/{rule_id}")
-async def delete_scaling_rule(rule_id: str):
-    """Delete a scaling rule."""
-    engine = get_engine()
-    deleted = engine.delete_rule(rule_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
-    return {"status": "deleted", "rule_id": rule_id}
-
-
-@router.post("/{rule_id}/toggle")
-async def toggle_scaling_rule(rule_id: str):
-    """Toggle a scaling rule on/off."""
-    engine = get_engine()
-    rule = engine.toggle_rule(rule_id)
-    if not rule:
-        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
-    return {"status": "toggled", "rule": rule}
-
-
-@router.get("/{rule_id}/executions")
-async def get_rule_executions(rule_id: str):
-    """Get execution history for a scaling rule."""
-    engine = get_engine()
-    rule = engine.get_rule(rule_id)
-    if not rule:
-        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
-    executions = engine.get_executions(rule_id)
-    return {"rule_id": rule_id, "executions": executions, "total": len(executions)}
-
-
-@router.post("/{rule_id}/test")
-async def test_scaling_rule(rule_id: str):
-    """
-    Dry-run test a scaling rule.
-    Checks CloudWatch metrics but does NOT execute any scaling actions.
-    """
-    engine = get_engine()
-    rule = engine.get_rule(rule_id)
-    if not rule:
-        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
-    result = engine.test_rule(rule_id)
-    return result
+@router.get("/executions/all")
+async def get_all_executions(db: Session = Depends(get_db)):
+    """Get all execution history across all rules."""
+    engine = get_engine(db)
+    executions = engine.get_executions()
+    return {"executions": executions, "total": len(executions)}
 
 
 @router.post("/evaluate")
-async def evaluate_all_rules():
+async def evaluate_all_rules(db: Session = Depends(get_db)):
     """
     Manually trigger evaluation of all enabled scaling rules.
     Rules that breach their thresholds will execute their scaling actions.
     """
-    engine = get_engine()
+    engine = get_engine(db)
     results = engine.evaluate_all_rules()
     triggered = [r for r in results if r.get("triggered")]
     return {
@@ -224,9 +171,64 @@ async def evaluate_all_rules():
     }
 
 
-@router.get("/executions/all")
-async def get_all_executions():
-    """Get all execution history across all rules."""
-    engine = get_engine()
-    executions = engine.get_executions()
-    return {"executions": executions, "total": len(executions)}
+@router.get("/{rule_id}")
+async def get_scaling_rule(rule_id: str, db: Session = Depends(get_db)):
+    """Get a specific scaling rule by ID."""
+    engine = get_engine(db)
+    rule = engine.get_rule(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
+    return {"rule": rule}
+
+
+@router.put("/{rule_id}")
+async def update_scaling_rule(rule_id: str, request: ScalingRuleUpdateRequest, db: Session = Depends(get_db)):
+    """Update an existing scaling rule."""
+    engine = get_engine(db)
+    data = {k: v for k, v in request.dict().items() if v is not None}
+    rule = engine.update_rule(rule_id, data)
+    if not rule:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
+    return {"status": "updated", "rule": rule}
+
+
+@router.delete("/{rule_id}")
+async def delete_scaling_rule(rule_id: str, db: Session = Depends(get_db)):
+    """Delete a scaling rule."""
+    engine = get_engine(db)
+    deleted = engine.delete_rule(rule_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
+    return {"status": "deleted", "rule_id": rule_id}
+
+
+@router.post("/{rule_id}/toggle")
+async def toggle_scaling_rule(rule_id: str, db: Session = Depends(get_db)):
+    """Toggle a scaling rule on/off."""
+    engine = get_engine(db)
+    rule = engine.toggle_rule(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
+    return {"status": "toggled", "rule": rule}
+
+
+@router.get("/{rule_id}/executions")
+async def get_rule_executions(rule_id: str, db: Session = Depends(get_db)):
+    """Get execution history for a scaling rule."""
+    engine = get_engine(db)
+    rule = engine.get_rule(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
+    executions = engine.get_executions(rule_id)
+    return {"rule_id": rule_id, "executions": executions, "total": len(executions)}
+
+
+@router.post("/{rule_id}/test")
+async def test_scaling_rule(rule_id: str, db: Session = Depends(get_db)):
+    """Dry-run test a scaling rule against current CloudWatch metrics."""
+    engine = get_engine(db)
+    rule = engine.get_rule(rule_id)
+    if not rule:
+        raise HTTPException(status_code=404, detail=f"Rule {rule_id} not found")
+    result = engine.test_rule(rule_id)
+    return {"rule_id": rule_id, "test_result": result}

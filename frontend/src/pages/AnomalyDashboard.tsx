@@ -74,12 +74,28 @@ const AnomalyDashboard: React.FC = () => {
   const [configurationOpen, setConfigurationOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Mock account ID - in real app, this would come from user context
-  const accountId = 'aws-account-123';
+  const [accountId, setAccountId] = useState<string>('aws-account-123');
 
   useEffect(() => {
-    loadDashboardData();
+    // Initial load will wait for account ID to be fetched
+    fetchAccountStatus();
   }, []);
+
+  const fetchAccountStatus = async () => {
+    setLoading(true);
+    try {
+      const { api } = await import('../services/api');
+      const statusRes = await api.get('/api/v1/aws/status');
+      if (statusRes.data?.connected && statusRes.data?.account_id) {
+        setAccountId(statusRes.data.account_id);
+      }
+    } catch (e) {
+      console.error("Failed to fetch AWS status, falling back to default account ID");
+    } finally {
+      // Once account is determined, load the dashboard data
+      loadDashboardData();
+    }
+  };
 
   const loadDashboardData = async () => {
     setLoading(true);

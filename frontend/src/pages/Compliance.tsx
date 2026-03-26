@@ -67,15 +67,13 @@ const Compliance: React.FC = () => {
   const loadComplianceData = async () => {
     try {
       setLoading(true);
-      const response = await fetch('http://localhost:8000/api/compliance');
-      const data = await response.json();
-
-      if (data.error === 'no_aws_account') {
-        setNoAws(true);
-        setLoading(false);
-        return;
+      const response = await fetch('/api/v1/compliance', { credentials: 'include' });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        if (response.status === 400) { setNoAws(true); setLoading(false); return; }
+        throw new Error(err.detail || 'Failed');
       }
-
+      const data = await response.json();
       setComplianceOverview(data.overview || null);
       setTaggingCompliance(data.taggingCompliance || []);
       setPolicyViolations(data.policyViolations || []);

@@ -113,6 +113,21 @@ class ServiceMatchingModel:
             Dictionary mapping generic service names to provider service IDs
         """
         return {
+            "compute": {
+                CloudProviderName.AWS: "ec2",
+                CloudProviderName.GCP: "compute_engine",
+                CloudProviderName.AZURE: "virtual_machines"
+            },
+            "storage": {
+                CloudProviderName.AWS: "s3",
+                CloudProviderName.GCP: "cloud_storage",
+                CloudProviderName.AZURE: "blob_storage"
+            },
+            "database": {
+                CloudProviderName.AWS: "rds",
+                CloudProviderName.GCP: "cloud_sql",
+                CloudProviderName.AZURE: "sql_database"
+            },
             # Compute services
             "virtual_machines": {
                 CloudProviderName.AWS: "ec2",

@@ -537,6 +537,42 @@ async def delete_migration_project(
 
 
 
+# Helper Functions
+
+def _build_assessment_answers(project) -> Dict[str, Any]:
+    """Construct a unified answers dictionary from project data models"""
+    answers = {}
+    
+    if hasattr(project, 'organization_profile') and project.organization_profile:
+        org = project.organization_profile
+        answers['organization'] = {
+            'company_size': org.company_size,
+            'industry': org.industry,
+            'current_infrastructure': org.current_infrastructure,
+            'it_team_size': org.it_team_size,
+            'cloud_experience_level': org.cloud_experience_level,
+            'geographic_presence': org.geographic_presence or []
+        }
+    
+    if hasattr(project, 'workload_profile') and project.workload_profile:
+        workload = project.workload_profile
+        answers['workload'] = {
+            'total_compute_cores': workload.total_compute_cores,
+            'total_memory_gb': workload.total_memory_gb,
+            'total_storage_tb': workload.total_storage_tb,
+            'database_types': workload.database_types or [],
+        }
+    
+    if hasattr(project, 'requirements') and project.requirements:
+        reqs = project.requirements
+        answers['performance'] = reqs.performance or {}
+        answers['compliance'] = reqs.compliance or {}
+        answers['budget'] = reqs.budget or {}
+        answers['technical'] = reqs.technical or {}
+        
+    return answers
+
+
 # Enhanced Scoring Endpoints
 
 @router.get("/projects/{project_id}/score-preview")
@@ -565,38 +601,7 @@ async def get_score_preview(
         )
     
     # Build answers dictionary from project data
-    answers = {}
-    
-    # Add organization data if available
-    if hasattr(project, 'organization_profile') and project.organization_profile:
-        org_profile = project.organization_profile
-        answers['organization'] = {
-            'company_size': org_profile.company_size,
-            'industry': org_profile.industry,
-            'current_infrastructure': org_profile.current_infrastructure,
-            'it_team_size': org_profile.it_team_size,
-            'cloud_experience_level': org_profile.cloud_experience_level,
-            'geographic_presence': org_profile.geographic_presence or []
-        }
-    
-    # Add workload data if available
-    if hasattr(project, 'workload_profile') and project.workload_profile:
-        workload = project.workload_profile
-        answers['workload'] = {
-            'total_compute_cores': workload.total_compute_cores,
-            'total_memory_gb': workload.total_memory_gb,
-            'total_storage_tb': workload.total_storage_tb,
-            'database_types': workload.database_types or [],
-            'data_volume_tb': workload.data_volume_tb
-        }
-    
-    # Add requirements data if available
-    if hasattr(project, 'requirements') and project.requirements:
-        reqs = project.requirements
-        answers['performance'] = reqs.performance or {}
-        answers['compliance'] = reqs.compliance or {}
-        answers['budget'] = reqs.budget or {}
-        answers['technical'] = reqs.technical or {}
+    answers = _build_assessment_answers(project)
     
     # Calculate scores using enhanced engine
     scoring_engine = EnhancedScoringEngine()
@@ -668,36 +673,8 @@ async def get_enhanced_recommendation(
             detail=f"Project {project_id} not found"
         )
     
-    # Build answers dictionary (same as score preview)
-    answers = {}
-    
-    if hasattr(project, 'organization_profile') and project.organization_profile:
-        org_profile = project.organization_profile
-        answers['organization'] = {
-            'company_size': org_profile.company_size,
-            'industry': org_profile.industry,
-            'current_infrastructure': org_profile.current_infrastructure,
-            'it_team_size': org_profile.it_team_size,
-            'cloud_experience_level': org_profile.cloud_experience_level,
-            'geographic_presence': org_profile.geographic_presence or []
-        }
-    
-    if hasattr(project, 'workload_profile') and project.workload_profile:
-        workload = project.workload_profile
-        answers['workload'] = {
-            'total_compute_cores': workload.total_compute_cores,
-            'total_memory_gb': workload.total_memory_gb,
-            'total_storage_tb': workload.total_storage_tb,
-            'database_types': workload.database_types or [],
-            'data_volume_tb': workload.data_volume_tb
-        }
-    
-    if hasattr(project, 'requirements') and project.requirements:
-        reqs = project.requirements
-        answers['performance'] = reqs.performance or {}
-        answers['compliance'] = reqs.compliance or {}
-        answers['budget'] = reqs.budget or {}
-        answers['technical'] = reqs.technical or {}
+    # Build answers dictionary
+    answers = _build_assessment_answers(project)
     
     # Generate recommendation
     scoring_engine = EnhancedScoringEngine()

@@ -56,18 +56,26 @@ const ProviderOverview: React.FC<ProviderOverviewProps> = ({ provider }) => {
     }
   };
 
-  const getProviderStats = (providerType: string) => {
-    // Mock stats - in real implementation, these would come from API
+  const getProviderStats = (provider: CloudProvider) => {
+    // Check if the provider object already has stats (e.g. from expanded API)
+    if (provider.pricing_model?.includes('{')) {
+       try {
+         const parsed = JSON.parse(provider.pricing_model);
+         if (parsed.marketShare) return parsed;
+       } catch (e) {}
+    }
+
+    // Mock stats fallback
     const stats = {
       aws: { marketShare: 32, reliability: 99.9, avgCost: 'Medium' },
       gcp: { marketShare: 9, reliability: 99.8, avgCost: 'Low' },
       azure: { marketShare: 20, reliability: 99.9, avgCost: 'Medium-High' }
     };
-    return stats[providerType.toLowerCase() as keyof typeof stats] || 
+    return stats[provider.provider_type.toLowerCase() as keyof typeof stats] || 
            { marketShare: 0, reliability: 99.0, avgCost: 'Unknown' };
   };
 
-  const stats = getProviderStats(provider.provider_type);
+  const stats = getProviderStats(provider);
 
   return (
     <Card 

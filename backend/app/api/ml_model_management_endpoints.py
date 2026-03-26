@@ -33,7 +33,7 @@ experiment_tracker = ExperimentTracker()
 model_interpreter = ModelInterpreter()
 bias_detector = BiasDetectionMitigation()
 
-router = APIRouter(prefix="/api/v1/ml", tags=["ML Model Management"])
+router = APIRouter(prefix="/ml", tags=["ML Model Management"])
 
 # Pydantic models for request/response
 class ModelTrainingRequest(BaseModel):

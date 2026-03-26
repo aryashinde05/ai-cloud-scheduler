@@ -3,7 +3,7 @@ import { Grid, Card, CardContent, Typography, Box, LinearProgress, Alert, Chip, 
 import { motion } from 'framer-motion';
 import {
   TrendingUp, AttachMoney, Savings, Warning,
-  AccountBalance, CloudOff, Refresh, Info,
+  AccountBalance, Refresh, Info, Layers,
 } from '@mui/icons-material';
 import {
   XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip,
@@ -11,6 +11,7 @@ import {
 } from 'recharts';
 import toast from 'react-hot-toast';
 import apiService from '../services/api';
+import { awsService } from '../services/awsService';
 import numeral from 'numeral';
 import { useNavigate } from 'react-router-dom';
 import { SkeletonLoader } from '../components/Loading';
@@ -63,7 +64,7 @@ const AwsDashboard: React.FC = () => {
     isRefresh ? setRefreshing(true) : setLoading(true);
 
     try {
-      const [costsResponse, budgets, recommendations] = await Promise.all([
+      const [costsResponse, budgets, recommendations, dashboardSummary] = await Promise.all([
         apiService.getCosts({
           startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
           endDate: new Date().toISOString().split('T')[0],
@@ -71,31 +72,52 @@ const AwsDashboard: React.FC = () => {
         }).catch(() => ({ data: [], total: 0 })),
         apiService.getBudgets().catch(() => [] as any[]),
         apiService.getOptimizationRecommendations().catch(() => [] as any[]),
+        awsService.getDashboard().catch(() => ({ finops_summary: null })),
       ]);
 
       const costData: any[] = Array.isArray((costsResponse as any)?.data) ? (costsResponse as any).data : [];
       const recsArray: any[] = Array.isArray(recommendations) ? recommendations as any[] : [];
       const budgetsArray: any[] = Array.isArray(budgets) ? budgets as any[] : [];
+      const summary = dashboardSummary?.finops_summary;
 
-      const totalCost = costData.reduce((s: number, i: any) => s + (i?.cost || 0), 0);
-      const totalSavings = recsArray.reduce((s: number, i: any) => s + (i?.monthlySavings || 0), 0);
+      // Use backend summary totalCost if costData is empty (fallback for when Cost Explorer is off)
+      const totalCost = costData.length > 0 
+        ? costData.reduce((s: number, i: any) => s + (i?.cost || 0), 0)
+        : (summary?.totalMonthlyCost || 0);
+
+      const totalSavings = summary?.monthlySavings ?? recsArray.reduce((s: number, i: any) => s + (i?.monthlySavings || 0), 0);
       const avgUtil = budgetsArray.length > 0
         ? budgetsArray.reduce((s: number, b: any) => s + (b?.utilization || 0), 0) / budgetsArray.length
         : 0;
 
-      const dateMap = new Map<string, number>();
-      costData.forEach((i: any) => dateMap.set(i.date, (dateMap.get(i.date) || 0) + (i.cost || 0)));
-      const chartData = Array.from(dateMap.entries())
-        .map(([date, amount]) => ({ date, amount }))
+      const chartData = costData
+        .map((i: any) => ({ 
+          date: i.date, 
+          amount: i.cost 
+        }))
         .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-      setFinopsData({ monthlyCost: totalCost, savingsPotential: totalSavings, budgetUtilization: avgUtil });
+      setFinopsData({ 
+        monthlyCost: totalCost, 
+        savingsPotential: totalSavings, 
+        budgetUtilization: avgUtil,
+        forecast: summary?.forecastedCost || (totalCost * 1.05),
+        resourceCount: summary?.resourceCount || 0
+      });
+      
       setCostTrendData(chartData);
-      setServiceBreakdown([]);
-      setBudgetData(budgetsArray.map((b: any) => ({ name: b.name, budget: b.amount, spent: b.spent, utilization: b.utilization })));
+      setServiceBreakdown([]); // TODO: Implement if needed
+      setBudgetData(budgetsArray.map((b: any) => ({ 
+        name: b.name, 
+        budget: b.amount, 
+        spent: b.spent, 
+        utilization: b.utilization 
+      })));
+      
       setLastRefresh(new Date());
       if (isRefresh) toast.success('Dashboard refreshed');
-    } catch {
+    } catch (err) {
+      console.error('AWS Dashboard load error:', err);
       toast.error('Failed to load AWS data.');
     } finally {
       setLoading(false);
@@ -147,10 +169,11 @@ const AwsDashboard: React.FC = () => {
         {[
           { title: 'Monthly Cost', value: numeral(finopsData?.monthlyCost).format('$0,0'), change: 'last 30 days', icon: <AttachMoney sx={{ fontSize: 40 }} />, color: '#ff9800' },
           { title: 'Potential Savings', value: numeral(finopsData?.savingsPotential).format('$0,0'), change: 'identified', icon: <Savings sx={{ fontSize: 40 }} />, color: '#4caf50' },
-          { title: 'Budget Utilization', value: `${Math.round(finopsData?.budgetUtilization || 0)}%`, change: 'of total budget', icon: <Warning sx={{ fontSize: 40 }} />, color: finopsData?.budgetUtilization > 85 ? '#f44336' : '#4caf50' },
-          { title: 'Cost Trend', value: costTrendData.length > 0 ? 'Active' : 'No data', change: 'last 30 days', icon: <TrendingUp sx={{ fontSize: 40 }} />, color: '#2196f3' },
+          { title: 'Budget Utilization', value: `${Math.round(finopsData?.budgetUtilization || 0)}%`, change: 'of total budget', icon: <Warning sx={{ fontSize: 40 }} />, color: (finopsData?.budgetUtilization || 0) > 85 ? '#f44336' : '#4caf50' },
+          { title: 'Total Resources', value: finopsData?.resourceCount || 0, change: 'active instances/items', icon: <Layers sx={{ fontSize: 40 }} />, color: '#2196f3' },
+          { title: 'Cost Forecast', value: numeral(finopsData?.forecast).format('$0,0'), change: 'next 30 days', icon: <TrendingUp sx={{ fontSize: 40 }} />, color: '#9c27b0' },
         ].map((card, i) => (
-          <Grid item xs={12} sm={6} md={3} key={i}>
+          <Grid item xs={12} sm={6} md={2.4} key={i}>
             <StatCard {...card} />
           </Grid>
         ))}

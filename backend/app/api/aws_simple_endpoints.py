@@ -23,6 +23,8 @@ class ResourceOut(BaseModel):
     aws_account_id: int
     resource_id: str
     resource_type: str
+    region: str | None = None
+    name: str | None = None
     instance_type: str | None = None
     state: str | None = None
     cpu_utilization: float | None = None
@@ -30,7 +32,7 @@ class ResourceOut(BaseModel):
     is_idle: bool
     is_oversized: bool
     is_unattached: bool
-    monthly_cost: float | None = None  # computed for display
+    monthly_cost: float | None = None
 
     class Config:
         orm_mode = True
@@ -43,7 +45,11 @@ router = APIRouter(prefix="/api/v1/aws", tags=["AWS Connection"])
 def aws_status(db: Session = Depends(get_db)):
     """Return whether AWS account is configured. Used by frontend to gate access."""
     account = AwsAccount.get_default(db)
-    return {"connected": account is not None, "region": account.region if account else None}
+    return {
+        "connected": account is not None,
+        "region": account.region if account else None,
+        "account_id": str(account.aws_account_id) if account and hasattr(account, 'aws_account_id') else str(account.id) if account else None
+    }
 
 
 @router.post("/connect")
@@ -69,22 +75,25 @@ def connect_aws_account(payload: AwsConnectRequest, db: Session = Depends(get_db
 
 
 @router.get("/resources", response_model=List[ResourceOut])
-def get_resources(db: Session = Depends(get_db)):
+def get_resources(region: str = None, db: Session = Depends(get_db)):
+    """
+    Refresh and return all resources. Scans ALL regions by default.
+    Pass ?region=us-east-1 to limit to a single region.
+    """
     account = AwsAccount.get_default(db)
     if not account:
         raise HTTPException(status_code=400, detail="AWS account not configured. Connect first.")
 
     try:
-        aws_collector.refresh_resources(db=db, account=account)
-        resources = (
-            db.query(Resource)
-            .filter(Resource.aws_account_id == account.id)
-            .order_by(Resource.resource_type, Resource.resource_id)
-            .all()
-        )
+        regions = [region] if region else None
+        aws_collector.refresh_resources(db=db, account=account, regions=regions)
+        query = db.query(Resource).filter(Resource.aws_account_id == account.id)
+        if region:
+            query = query.filter(Resource.region == region)
+        resources = query.order_by(Resource.resource_type, Resource.resource_id).all()
         return [
             ResourceOut(
-                **{k: getattr(r, k) for k in ["id", "aws_account_id", "resource_id", "resource_type", "instance_type", "state", "cpu_utilization", "volume_size", "is_idle", "is_oversized", "is_unattached"]},
+                **{k: getattr(r, k) for k in ["id", "aws_account_id", "resource_id", "resource_type", "region", "name", "instance_type", "state", "cpu_utilization", "volume_size", "is_idle", "is_oversized", "is_unattached"]},
                 monthly_cost=round(optimizer.estimate_resource_monthly_cost(r), 2),
             )
             for r in resources
@@ -109,7 +118,7 @@ def get_instances(db: Session = Depends(get_db)):
         )
         return [
             ResourceOut(
-                **{k: getattr(r, k) for k in ["id", "aws_account_id", "resource_id", "resource_type", "instance_type", "state", "cpu_utilization", "volume_size", "is_idle", "is_oversized", "is_unattached"]},
+                **{k: getattr(r, k) for k in ["id", "aws_account_id", "resource_id", "resource_type", "region", "name", "instance_type", "state", "cpu_utilization", "volume_size", "is_idle", "is_oversized", "is_unattached"]},
                 monthly_cost=round(optimizer.estimate_resource_monthly_cost(r), 2),
             )
             for r in resources
@@ -118,8 +127,73 @@ def get_instances(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Backend error: {e}")
 
 
-@router.delete("/disconnect")
-def disconnect_aws_account(db: Session = Depends(get_db)):
+@router.get("/rds", response_model=List[ResourceOut])
+def get_rds_instances(db: Session = Depends(get_db)):
+    """Fetch real RDS instances across all regions."""
+    account = AwsAccount.get_default(db)
+    if not account:
+        raise HTTPException(status_code=400, detail="AWS account not configured.")
+
+    import boto3
+    from botocore.config import Config as BotoConfig
+    from datetime import datetime, timedelta
+
+    ALL_REGIONS = [
+        "us-east-1", "us-east-2", "us-west-1", "us-west-2",
+        "eu-west-1", "eu-west-2", "eu-central-1",
+        "ap-southeast-1", "ap-southeast-2", "ap-northeast-1",
+        "ap-south-1", "sa-east-1", "ca-central-1",
+    ]
+    cfg = BotoConfig(retries={"max_attempts": 2, "mode": "standard"}, connect_timeout=5, read_timeout=10)
+    access_key, secret_key, stored_region = account.get_decrypted_credentials()
+    session = boto3.Session(aws_access_key_id=access_key, aws_secret_access_key=secret_key)
+
+    results = []
+    for region in ALL_REGIONS:
+        try:
+            rds_client = session.client("rds", region_name=region, config=cfg)
+            cw = session.client("cloudwatch", region_name=region, config=cfg)
+            paginator = rds_client.get_paginator("describe_db_instances")
+            for page in paginator.paginate():
+                for db_inst in page.get("DBInstances", []):
+                    db_id = db_inst["DBInstanceIdentifier"]
+                    # Get CPU from CloudWatch
+                    cpu = None
+                    try:
+                        now = datetime.utcnow()
+                        resp = cw.get_metric_statistics(
+                            Namespace="AWS/RDS", MetricName="CPUUtilization",
+                            Dimensions=[{"Name": "DBInstanceIdentifier", "Value": db_id}],
+                            StartTime=now - timedelta(hours=24), EndTime=now,
+                            Period=3600, Statistics=["Average"],
+                        )
+                        dps = resp.get("Datapoints", [])
+                        if dps:
+                            cpu = round(sum(d["Average"] for d in dps) / len(dps), 1)
+                    except Exception:
+                        pass
+
+                    results.append({
+                        "id": 0, "aws_account_id": account.id,
+                        "resource_id": db_id,
+                        "resource_type": "rds_instance",
+                        "region": region,
+                        "name": db_id,
+                        "instance_type": db_inst.get("DBInstanceClass"),
+                        "state": db_inst.get("DBInstanceStatus"),
+                        "cpu_utilization": cpu,
+                        "volume_size": db_inst.get("AllocatedStorage"),
+                        "is_idle": cpu is not None and cpu < 2.0,
+                        "is_oversized": cpu is not None and cpu < 10.0,
+                        "is_unattached": False,
+                        "monthly_cost": None,
+                        "engine": db_inst.get("Engine"),
+                        "connections": None,
+                    })
+        except Exception:
+            continue
+
+    return results
     """Remove the stored AWS account credentials."""
     account = AwsAccount.get_default(db)
     if not account:
@@ -141,11 +215,16 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
     oversized_count = sum(1 for r in resources if r.is_oversized)
     unattached_count = sum(1 for r in resources if r.is_unattached)
 
+    total_cost = sum(optimizer.estimate_resource_monthly_cost(r) for r in resources)
+    # Savings potential is roughly the cost of idle/oversized/unattached resources
+    savings_potential = sum(optimizer.estimate_resource_monthly_cost(r) for r in resources if r.is_idle or r.is_oversized or r.is_unattached)
+
     return {
         "finops_summary": {
-            "totalMonthlyCost": 0,
-            "monthlySavings": 0,
+            "totalMonthlyCost": round(total_cost, 2),
+            "monthlySavings": round(savings_potential, 2),
             "optimizationOpportunities": idle_count + oversized_count + unattached_count,
             "resourceCount": len(resources),
+            "forecastedCost": round(total_cost * 1.05, 2), # Simplified 5% buffer for forecast
         }
     }

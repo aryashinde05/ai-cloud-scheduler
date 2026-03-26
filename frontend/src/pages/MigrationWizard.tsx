@@ -25,6 +25,7 @@ import { useNavigate } from 'react-router-dom';
 import OrganizationProfileForm from '../components/MigrationWizard/OrganizationProfileForm';
 import WorkloadProfileForm from '../components/MigrationWizard/WorkloadProfileForm';
 import RequirementsForm from '../components/MigrationWizard/RequirementsForm';
+import migrationApi, { ProviderRecommendation } from '../services/migrationApi';
 
 const STORAGE_KEY = 'migration_wizard_data';
 
@@ -214,35 +215,57 @@ const PROVIDER_META: Record<string, { icon: string; strengths: string[]; bestFor
 
 // ── Results step ────────────────────────────────────────────────────────────
 
-const ResultsStep: React.FC<{ org: any; workload: any; req: any }> = ({ org, workload, req }) => {
-  const scores = scoreProviders(org, workload, req);
-  const sorted = Object.entries(scores).sort(([, a], [, b]) => b - a);
-  const [topProvider, topScore] = sorted[0];
-  const maxScore = topScore;
-  const complexity = getMigrationComplexity(workload, req);
-  const targetCost = req?.budget?.target_monthly_cost || 4000;
+const ResultsStep: React.FC<{ 
+  org: any; 
+  workload: any; 
+  req: any;
+  recommendations: ProviderRecommendation[];
+  loading: boolean;
+  error: string | null;
+}> = ({ org, workload, req, recommendations, loading, error }) => {
+  if (loading) {
+    return (
+      <Box sx={{ py: 8, textAlign: 'center' }}>
+        <LinearProgress sx={{ mb: 2 }} />
+        <Typography color="text.secondary">Generating your personalized cloud recommendation...</Typography>
+      </Box>
+    );
+  }
 
-  const costMultipliers: Record<string, number> = { AWS: 1.0, Azure: 0.95, GCP: 0.90 };
+  if (error || !recommendations || recommendations.length === 0) {
+    return (
+      <Box sx={{ py: 4 }}>
+        <Alert severity="error">
+          {error || "Failed to generate recommendations. Please try again or contact support."}
+        </Alert>
+      </Box>
+    );
+  }
+
+  const sorted = [...recommendations].sort((a, b) => b.overall_score - a.overall_score);
+  const topProvider = sorted[0];
+  const maxScore = topProvider.overall_score;
+  const complexity = getMigrationComplexity(workload, req);
 
   return (
     <Box>
       <Alert severity="success" sx={{ mb: 3 }}>
-        Assessment complete. Here's your personalised cloud recommendation.
+        Assessment complete. Here's your personalized cloud recommendation based on live pricing data.
       </Alert>
 
       {/* Top recommendation */}
       <Paper sx={{ p: 3, mb: 3, border: '2px solid', borderColor: 'success.main', bgcolor: 'success.light' }}>
         <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-          <Typography variant="h3" sx={{ mr: 2 }}>{PROVIDER_META[topProvider]?.icon}</Typography>
+          <Typography variant="h3" sx={{ mr: 2 }}>{PROVIDER_META[topProvider.provider]?.icon || '☁️'}</Typography>
           <Box>
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
               <Typography variant="h5" sx={{ fontWeight: 'bold', color: 'success.dark' }}>
-                {topProvider}
+                {topProvider.provider}
               </Typography>
               <Chip label="Recommended" color="success" size="small" icon={<CheckCircleIcon />} />
             </Box>
             <Typography variant="body2" color="success.dark">
-              Score: {topScore} points — best match for your requirements
+              Score: {Math.round(topProvider.overall_score)} points — best match for your requirements
             </Typography>
           </Box>
         </Box>
@@ -252,23 +275,23 @@ const ResultsStep: React.FC<{ org: any; workload: any; req: any }> = ({ org, wor
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
             <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>Key Strengths</Typography>
-            {PROVIDER_META[topProvider]?.strengths.map((s, i) => (
+            {topProvider.strengths.map((s, i) => (
               <Typography key={i} variant="body2" sx={{ ml: 1, mb: 0.5 }}>• {s}</Typography>
             ))}
           </Grid>
           <Grid item xs={12} md={6}>
             <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>Best For</Typography>
-            {PROVIDER_META[topProvider]?.bestFor.map((s, i) => (
+            {(PROVIDER_META[topProvider.provider]?.bestFor || ['General workloads']).map((s, i) => (
               <Typography key={i} variant="body2" sx={{ ml: 1, mb: 0.5 }}>• {s}</Typography>
             ))}
           </Grid>
           <Grid item xs={12}>
             <Box sx={{ p: 2, bgcolor: 'background.paper', borderRadius: 1 }}>
               <Typography variant="subtitle2" sx={{ fontWeight: 'bold' }}>
-                Estimated Monthly Cost: ${Math.round(targetCost * (costMultipliers[topProvider] || 1)).toLocaleString()}
+                Estimated Monthly Cost: ${Math.round(topProvider.estimated_monthly_cost).toLocaleString()}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                Based on your target budget of ${targetCost.toLocaleString()}/month
+                Calculated using Multi-Cloud Cost Engine and live AWS/Azure pricing.
               </Typography>
             </Box>
           </Grid>
@@ -302,21 +325,21 @@ const ResultsStep: React.FC<{ org: any; workload: any; req: any }> = ({ org, wor
       {/* Score comparison */}
       <Paper sx={{ p: 3, mb: 3 }}>
         <Typography variant="h6" gutterBottom>Provider Score Comparison</Typography>
-        {sorted.map(([provider, score], idx) => (
-          <Box key={provider} sx={{ mb: 2 }}>
+        {sorted.map((p, idx) => (
+          <Box key={p.provider} sx={{ mb: 2 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 0.5 }}>
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <Typography>{PROVIDER_META[provider]?.icon}</Typography>
+                <Typography>{PROVIDER_META[p.provider]?.icon || '☁️'}</Typography>
                 <Typography variant="body2" sx={{ fontWeight: idx === 0 ? 'bold' : 'normal' }}>
-                  {provider}
+                  {p.provider}
                 </Typography>
                 {idx === 0 && <Chip label="Top Pick" size="small" color="success" />}
               </Box>
-              <Typography variant="body2" sx={{ fontWeight: 'bold' }}>{score} pts</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 'bold' }}>{Math.round(p.overall_score)} pts</Typography>
             </Box>
             <LinearProgress
               variant="determinate"
-              value={(score / maxScore) * 100}
+              value={(p.overall_score / maxScore) * 100}
               color={idx === 0 ? 'success' : 'primary'}
               sx={{ height: 8, borderRadius: 4 }}
             />
@@ -327,25 +350,25 @@ const ResultsStep: React.FC<{ org: any; workload: any; req: any }> = ({ org, wor
       {/* Alternatives */}
       <Typography variant="h6" gutterBottom>Alternative Options</Typography>
       <Grid container spacing={2} sx={{ mb: 3 }}>
-        {sorted.slice(1).map(([provider, score]) => {
-          const meta = PROVIDER_META[provider];
+        {sorted.slice(1).map((p) => {
+          const meta = PROVIDER_META[p.provider];
           return (
-            <Grid item xs={12} md={6} key={provider}>
+            <Grid item xs={12} md={6} key={p.provider}>
               <Card>
                 <CardContent>
                   <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-                    <Typography variant="h4" sx={{ mr: 1 }}>{meta?.icon}</Typography>
+                    <Typography variant="h4" sx={{ mr: 1 }}>{meta?.icon || '☁️'}</Typography>
                     <Box>
-                      <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{provider}</Typography>
-                      <Typography variant="body2" color="text.secondary">Score: {score} pts</Typography>
+                      <Typography variant="h6" sx={{ fontWeight: 'bold' }}>{p.provider}</Typography>
+                      <Typography variant="body2" color="text.secondary">Score: {Math.round(p.overall_score)} pts</Typography>
                     </Box>
                   </Box>
-                  {meta?.strengths.slice(0, 3).map((s, i) => (
+                  {p.strengths.slice(0, 3).map((s, i) => (
                     <Typography key={i} variant="body2" sx={{ ml: 1, mb: 0.5 }}>• {s}</Typography>
                   ))}
                   <Box sx={{ mt: 2, p: 1.5, bgcolor: 'grey.100', borderRadius: 1 }}>
                     <Typography variant="body2" sx={{ fontWeight: 'bold' }}>
-                      Est. Monthly: ${Math.round(targetCost * (costMultipliers[provider] || 1)).toLocaleString()}
+                      Est. Monthly: ${Math.round(p.estimated_monthly_cost).toLocaleString()}
                     </Typography>
                   </Box>
                 </CardContent>
@@ -353,38 +376,6 @@ const ResultsStep: React.FC<{ org: any; workload: any; req: any }> = ({ org, wor
             </Grid>
           );
         })}
-      </Grid>
-
-      {/* Summary */}
-      <Typography variant="h6" gutterBottom>Your Assessment Summary</Typography>
-      <Grid container spacing={2}>
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>Organization</Typography>
-            <Typography variant="body2" color="text.secondary">Size: {org?.company_size}</Typography>
-            <Typography variant="body2" color="text.secondary">Industry: {org?.industry}</Typography>
-            <Typography variant="body2" color="text.secondary">IT Team: {org?.it_team_size} people</Typography>
-            <Typography variant="body2" color="text.secondary">Cloud XP: {org?.cloud_experience_level}</Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>Infrastructure</Typography>
-            <Typography variant="body2" color="text.secondary">Servers: {workload?.physical_servers}</Typography>
-            <Typography variant="body2" color="text.secondary">CPU Cores: {workload?.total_compute_cores}</Typography>
-            <Typography variant="body2" color="text.secondary">Memory: {workload?.total_memory_gb} GB</Typography>
-            <Typography variant="body2" color="text.secondary">Data: {workload?.data_volume_tb} TB</Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 2 }}>
-            <Typography variant="subtitle2" sx={{ fontWeight: 'bold', mb: 1 }}>Requirements</Typography>
-            <Typography variant="body2" color="text.secondary">Uptime: {req?.performance?.availability_target}%</Typography>
-            <Typography variant="body2" color="text.secondary">Budget: ${req?.budget?.migration_budget?.toLocaleString()}</Typography>
-            <Typography variant="body2" color="text.secondary">Cost Priority: {req?.budget?.cost_optimization_priority}</Typography>
-            <Typography variant="body2" color="text.secondary">Compliance: {req?.compliance?.regulatory_frameworks?.length || 0} frameworks</Typography>
-          </Paper>
-        </Grid>
       </Grid>
     </Box>
   );
@@ -407,6 +398,10 @@ const MigrationWizard: React.FC = () => {
   const [orgData, setOrgData] = useState<any>(saved?.org || defaultOrgData);
   const [workloadData, setWorkloadData] = useState<any>(saved?.workload || defaultWorkloadData);
   const [reqData, setReqData] = useState<any>(saved?.req || defaultRequirementsData);
+  
+  const [recommendations, setRecommendations] = useState<ProviderRecommendation[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Auto-save to sessionStorage
   useEffect(() => {
@@ -417,7 +412,39 @@ const MigrationWizard: React.FC = () => {
   const handleWorkloadChange = useCallback((data: any) => setWorkloadData(data), []);
   const handleReqChange = useCallback((data: any) => setReqData(data), []);
 
-  const handleNext = () => setActiveStep((s) => Math.min(s + 1, steps.length - 1));
+  const handleNext = async () => {
+    if (activeStep === steps.length - 2) {
+      // Transitioning to results - trigger backend assessment
+      setLoading(true);
+      setError(null);
+      setActiveStep((s) => s + 1);
+      
+      try {
+        // 1. Create Project
+        const project = await migrationApi.createProject({
+          organization_name: `${orgData.industry} Cloud Migration ${new Date().toLocaleDateString()}`
+        });
+        
+        // 2. Submit data components
+        await Promise.all([
+          migrationApi.submitOrganizationProfile(project.project_id, orgData),
+          migrationApi.submitWorkloadProfile(project.project_id, workloadData),
+          migrationApi.submitRequirements(project.project_id, reqData)
+        ]);
+        
+        // 3. Generate Recommendations
+        const recs = await migrationApi.generateRecommendations(project.project_id, reqData);
+        setRecommendations(recs);
+      } catch (err: any) {
+        console.error("Migration recommendation failed:", err);
+        setError(err.response?.data?.error?.message || "Failed to generate recommendation. Please try again.");
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setActiveStep((s) => Math.min(s + 1, steps.length - 1));
+    }
+  };
   const handleBack = () => setActiveStep((s) => Math.max(s - 1, 0));
 
   const handleReset = () => {
@@ -434,7 +461,15 @@ const MigrationWizard: React.FC = () => {
     <OrganizationProfileForm key="org" data={orgData} onChange={handleOrgChange} />,
     <WorkloadProfileForm key="workload" data={workloadData} onChange={handleWorkloadChange} />,
     <RequirementsForm key="req" data={reqData} onChange={handleReqChange} />,
-    <ResultsStep key="results" org={orgData} workload={workloadData} req={reqData} />,
+    <ResultsStep 
+      key="results" 
+      org={orgData} 
+      workload={workloadData} 
+      req={reqData} 
+      recommendations={recommendations}
+      loading={loading}
+      error={error}
+    />,
   ];
 
   return (

@@ -24,12 +24,22 @@ export default function AwsConnection() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+  const [currentRegion, setCurrentRegion] = useState<string | null>(null);
   
   const [credentials, setCredentials] = useState({
     access_key: '',
     secret_key: '',
     region: 'us-east-1'
   });
+
+  React.useEffect(() => {
+    awsService.getStatus().then((s: any) => {
+      if (s?.connected && s?.region) {
+        setCurrentRegion(s.region);
+        setCredentials(prev => ({ ...prev, region: s.region }));
+      }
+    }).catch(() => {});
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setCredentials({ ...credentials, [e.target.name]: e.target.value });
@@ -89,6 +99,13 @@ export default function AwsConnection() {
         </Box>
 
         <Grid container spacing={3} mb={3}>
+          {currentRegion && (
+            <Grid item xs={12}>
+              <Alert severity="info">
+                Currently connected to region: <strong>{currentRegion}</strong>. Enter your credentials below to update or change region.
+              </Alert>
+            </Grid>
+          )}
           <Grid item xs={12}>
             <TextField
               fullWidth

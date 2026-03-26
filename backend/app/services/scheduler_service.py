@@ -399,16 +399,16 @@ class SchedulerService:
         }
 
     def _get_network_metric(
-        self, cw_client, instance_id: str, metric_name: str, days: int = 7
+        self, cw_client, namespace: str, dim_name: str, instance_id: str, metric_name: str, days: int = 7
     ) -> List[Dict[str, Any]]:
         """Get network metric trend (6h intervals)."""
         try:
             end = datetime.now(timezone.utc)
             start = end - timedelta(days=days)
             response = cw_client.get_metric_statistics(
-                Namespace="AWS/EC2",
+                Namespace=namespace,
                 MetricName=metric_name,
-                Dimensions=[{"Name": "InstanceId", "Value": instance_id}],
+                Dimensions=[{"Name": dim_name, "Value": instance_id}],
                 StartTime=start,
                 EndTime=end,
                 Period=21600,

@@ -43,11 +43,13 @@ from app.api.collaboration_endpoints import router as collaboration_router
 from app.api.communication_endpoints import router as communication_router
 from app.api.video_endpoints import router as video_router
 from app.api.onboarding import router as onboarding_router
-from app.api.api_logging_endpoints import router as api_logging_router
 from app.api.scheduler_endpoints import router as scheduler_router
 from app.api.scaling_rules_endpoints import router as scaling_rules_router
-from app.services.ai_services_documentation import router as ai_services_docs_router
 from app.api.aws_simple_endpoints import router as aws_simple_router
+from app.api.budgets_endpoints import router as budgets_router
+from app.api.compliance_endpoints import router as compliance_router
+from app.api.reports_endpoints import router as reports_router
+from app.api.automation_stats_endpoints import router as automation_stats_router
 
 # Migration Advisor routers
 try:
@@ -224,31 +226,28 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 app.include_router(auth_router)
 app.include_router(health_router)
 app.include_router(aws_simple_router)
+app.include_router(budgets_router)
+app.include_router(compliance_router)
+app.include_router(reports_router)
+app.include_router(automation_stats_router)
 app.include_router(aws_cost_router)
 app.include_router(azure_cost_router)
 app.include_router(aws_cost_alerts_router)
 app.include_router(webhook_router, prefix="/api/v1")
-app.include_router(automation_router)
 app.include_router(anomaly_detection_router)
 app.include_router(multi_cloud_router, prefix="/api/v1")
-app.include_router(gnn_router)
-app.include_router(ai_monitoring_router, prefix="/api/v1")
-app.include_router(collaboration_router, prefix="/api/v1")
-app.include_router(communication_router, prefix="/api/v1")
-app.include_router(video_router, prefix="/api/v1")
 app.include_router(onboarding_router, prefix="/api/v1")
-app.include_router(api_logging_router)
 app.include_router(scheduler_router, prefix="/api")
 app.include_router(scaling_rules_router, prefix="/api/v1")
 app.include_router(resources_router)
-app.include_router(ai_services_docs_router)
+app.include_router(ai_assistant_router)
 
 # Migration Advisor
 if _migration_routers_loaded:
-    app.include_router(migration_assessment_router, prefix="/api")
-    app.include_router(migration_requirements_router, prefix="/api")
-    app.include_router(migration_recommendation_router, prefix="/api")
-    app.include_router(migration_planning_router, prefix="/api")
+    app.include_router(migration_assessment_router)
+    app.include_router(migration_requirements_router)
+    app.include_router(migration_recommendation_router)
+    app.include_router(migration_planning_router)
 
 
 # Root endpoint

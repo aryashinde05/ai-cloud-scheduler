@@ -85,19 +85,21 @@ const Optimization: React.FC = () => {
     try {
       setLoading(true);
 
-      const [actionsRes, statsRes] = await Promise.all([
-        api.get('/api/automation/actions'),
-        api.get('/api/automation/stats'),
-      ]);
-
-      const actionsData = actionsRes.data;
-      const statsData = statsRes.data;
-
-      if (actionsData.error === 'no_aws_account') {
+      // Check AWS connection first
+      const statusRes = await api.get('/api/v1/aws/status');
+      if (!statusRes.data?.connected) {
         setNoAws(true);
         setLoading(false);
         return;
       }
+
+      const [actionsRes, statsRes] = await Promise.all([
+        api.get('/api/v1/automation/actions'),
+        api.get('/api/v1/automation/reports/summary').catch(() => ({ data: null })),
+      ]);
+
+      const actionsData = actionsRes.data;
+      const statsData = statsRes.data;
 
       // Transform action data into optimization opportunities format
       const opportunities = (Array.isArray(actionsData) ? actionsData : []).map((action: any, i: number) => ({
@@ -185,7 +187,7 @@ const Optimization: React.FC = () => {
   const confirmImplementation = async () => {
     if (selectedRecommendation) {
       try {
-        await api.post(`/api/automation/actions/${selectedRecommendation.resource}/execute`);
+        await api.post(`/api/v1/automation/actions/execute`, { action_ids: [selectedRecommendation.resource] });
       } catch (e) {
         console.error('Error executing action:', e);
       }

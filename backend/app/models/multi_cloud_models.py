@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Any, Union
 from enum import Enum
 
 from pydantic import BaseModel, Field, validator
+from pydantic.types import UUID4
 
 
 class CloudProvider(str, Enum):
@@ -372,3 +373,33 @@ class MigrationAnalysisResponse(BaseModel):
     recommendations: List[CostRecommendation] = Field(default_factory=list, description="Migration recommendations")
     error_message: Optional[str] = Field(default=None, description="Error message if failed")
     processing_time_ms: int = Field(..., description="Processing time in milliseconds")
+
+class SavingsOpportunity(BaseModel):
+    opportunity_type: str = Field(...)
+    description: str = Field(...)
+    monthly_savings: Decimal = Field(...)
+    annual_savings: Decimal = Field(...)
+    confidence_score: float = Field(...)
+    applicable_providers: List[str] = Field(...)
+
+class RiskFactor(BaseModel):
+    risk_type: str = Field(...)
+    risk_level: str = Field(...)
+    description: str = Field(...)
+    mitigation_strategy: str = Field(...)
+    impact_score: float = Field(...)
+
+class MigrationPhase(BaseModel):
+    phase_name: str = Field(...)
+    duration_days: int = Field(...)
+    cost: Decimal = Field(...)
+    dependencies: List[str] = Field(...)
+    deliverables: List[str] = Field(...)
+
+class TCOComponent(BaseModel):
+    component_name: str = Field(...)
+    year_1_cost: Decimal = Field(...)
+    year_2_cost: Decimal = Field(...)
+    year_3_cost: Decimal = Field(...)
+    total_cost: Decimal = Field(...)
+    description: str = Field(...)

@@ -31,6 +31,7 @@ import {
   Storage as AwsIcon,
   Cloud as AzureIcon,
   AppsOutlined as AppsIcon,
+  DeviceHub as InfraIcon,
 } from '@mui/icons-material';
 
 const drawerWidth = 280;
@@ -73,7 +74,8 @@ const menuSections: MenuSection[] = [
     label: 'AWS',
     items: [
       { text: 'AWS Dashboard', icon: <AwsIcon />, path: '/aws/dashboard' },
-      { text: 'Connect AWS', icon: <LinkIcon />, path: '/onboarding' },
+      { text: 'Infrastructure', icon: <InfraIcon />, path: '/aws/infrastructure', awsOnly: true },
+      { text: 'Connect AWS', icon: <LinkIcon />, path: '/aws/connection' },
     ],
   },
   {

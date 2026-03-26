@@ -18,7 +18,7 @@ from app.services.webhook_manager import (
 )
 from app.core.auth import get_current_user
 
-router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
+router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
 # Pydantic models for API

@@ -43,6 +43,7 @@ const AzureOpportunities = lazy(() => import('./pages/AzureOpportunities'));
 
 // AWS Pages
 const AwsConnection = lazy(() => import('./pages/AwsConnection'));
+const InfrastructureAnalysis = lazy(() => import('./pages/InfrastructureAnalysis'));
 
 // Theme
 const theme = createTheme({
@@ -206,6 +207,7 @@ function App() {
 
                     {/* AWS routes */}
                     <Route path="/aws/connection" element={<ProtectedDashboard><AwsConnection /></ProtectedDashboard>} />
+                    <Route path="/aws/infrastructure" element={<ProtectedDashboard><InfrastructureAnalysis /></ProtectedDashboard>} />
                   </Routes>
                   <PlatformFloatingChat />
                 </Suspense>

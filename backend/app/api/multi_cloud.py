@@ -90,65 +90,87 @@ async def compare_workload_costs(
         
         saved_workload = await repository.save_workload_specification(workload_data)
         
-        # Placeholder cost calculation
-        base_compute_cost = Decimal(str(workload.compute_spec.cpu_cores * 50 + workload.compute_spec.memory_gb * 5))
-        base_storage_cost = Decimal(str(workload.storage_spec.primary_storage_gb * 0.1))
-        base_network_cost = Decimal(str(workload.network_spec.data_transfer_gb_monthly * 0.05))
+        from app.services.multi_cloud_cost_engine import MultiCloudCostEngine
+        from app.models.multi_cloud_models import (
+            WorkloadSpec, ComputeSpec, StorageSpec, NetworkSpec, DatabaseSpec,
+            StorageType, NetworkComponent, NetworkServiceType, CloudProvider
+        )
+        engine = MultiCloudCostEngine()
         
-        # Mock cost comparison data
+        # Build domain models
+        compute = ComputeSpec(
+            vcpus=workload.compute_spec.cpu_cores,
+            memory_gb=float(workload.compute_spec.memory_gb),
+            operating_system=workload.compute_spec.operating_system,
+            architecture=workload.compute_spec.architecture
+        )
+        storage_models = []
+        if workload.storage_spec:
+            storage_type = StorageType.OBJECT if workload.storage_spec.storage_type == 'object' else StorageType.BLOCK
+            storage_models.append(StorageSpec(
+                storage_type=storage_type,
+                capacity_gb=workload.storage_spec.primary_storage_gb,
+                iops_requirement=workload.storage_spec.iops_requirement,
+                throughput_mbps=workload.storage_spec.throughput_mbps
+            ))
+        network = None
+        if workload.network_spec:
+            components = []
+            if workload.network_spec.data_transfer_gb_monthly > 0:
+                components.append(NetworkComponent(
+                    service_type=NetworkServiceType.CDN if workload.network_spec.cdn_required else NetworkServiceType.API_GATEWAY
+                ))
+            network = NetworkSpec(components=components)
+        
+        db_spec = None
+        if workload.database_spec:
+            db_spec = DatabaseSpec(
+                database_type=workload.database_spec.database_type,
+                instance_class="standard",
+                storage_gb=workload.database_spec.storage_gb,
+                backup_retention_days=workload.database_spec.backup_retention_days
+            )
+            
+        domain_workload = WorkloadSpec(
+            name=workload.name,
+            description=workload.description,
+            compute=compute,
+            storage=storage_models,
+            network=network,
+            database=db_spec,
+            additional_services=[{"name": s} for s in workload.additional_services],
+            usage_patterns=workload.usage_patterns.dict()
+        )
+        
+        result = await engine.compare_workload_costs(domain_workload)
+        comparison = result["comparison"]
+        cost_diffs = result["cost_differences"]
+        
         comparison_data = {
             "workload_id": saved_workload.id,
-            "comparison_date": datetime.utcnow(),
-            "aws_monthly_cost": base_compute_cost * Decimal("1.0") + base_storage_cost * Decimal("1.2") + base_network_cost,
-            "gcp_monthly_cost": base_compute_cost * Decimal("0.95") + base_storage_cost * Decimal("1.1") + base_network_cost * Decimal("0.9"),
-            "azure_monthly_cost": base_compute_cost * Decimal("1.05") + base_storage_cost * Decimal("1.15") + base_network_cost * Decimal("0.95"),
+            "comparison_date": comparison.comparison_date,
+            "aws_monthly_cost": comparison.provider_costs.get(CloudProvider.AWS).total_monthly_cost if CloudProvider.AWS in comparison.provider_costs else Decimal('0'),
+            "gcp_monthly_cost": comparison.provider_costs.get(CloudProvider.GCP).total_monthly_cost if CloudProvider.GCP in comparison.provider_costs else Decimal('0'),
+            "azure_monthly_cost": comparison.provider_costs.get(CloudProvider.AZURE).total_monthly_cost if CloudProvider.AZURE in comparison.provider_costs else Decimal('0'),
+            "lowest_cost_provider": comparison.lowest_cost_provider.value,
+            "pricing_data_version": "live",
             "cost_breakdown": {
-                "aws": {
-                    "compute": base_compute_cost,
-                    "storage": base_storage_cost * Decimal("1.2"),
-                    "network": base_network_cost,
-                    "total": base_compute_cost + base_storage_cost * Decimal("1.2") + base_network_cost
-                },
-                "gcp": {
-                    "compute": base_compute_cost * Decimal("0.95"),
-                    "storage": base_storage_cost * Decimal("1.1"),
-                    "network": base_network_cost * Decimal("0.9"),
-                    "total": base_compute_cost * Decimal("0.95") + base_storage_cost * Decimal("1.1") + base_network_cost * Decimal("0.9")
-                },
-                "azure": {
-                    "compute": base_compute_cost * Decimal("1.05"),
-                    "storage": base_storage_cost * Decimal("1.15"),
-                    "network": base_network_cost * Decimal("0.95"),
-                    "total": base_compute_cost * Decimal("1.05") + base_storage_cost * Decimal("1.15") + base_network_cost * Decimal("0.95")
-                }
+                p.value: {
+                    "compute": sum(c.monthly_cost for c in comparison.provider_costs[p].service_costs if c.service_category == "compute"),
+                    "storage": sum(c.monthly_cost for c in comparison.provider_costs[p].service_costs if c.service_category == "storage"),
+                    "network": sum(c.monthly_cost for c in comparison.provider_costs[p].service_costs if c.service_category == "network"),
+                    "database": sum(c.monthly_cost for c in comparison.provider_costs[p].service_costs if c.service_category == "database"),
+                    "total": comparison.provider_costs[p].total_monthly_cost
+                } for p in comparison.provider_costs
             },
-            "recommendations": [
-                "Consider GCP for compute-intensive workloads due to 5% cost savings",
-                "AWS offers better storage performance but at 20% higher cost",
-                "Azure provides balanced pricing across all service categories"
-            ],
-            "pricing_data_version": "2024-12-29"
+            "cost_difference_percentage": {p.value: cost_diffs.get(p, 0.0) for p in comparison.provider_costs},
+            "recommendations": [r.description for r in result["recommendations"]]
         }
         
         # Calculate annual costs
         comparison_data["aws_annual_cost"] = comparison_data["aws_monthly_cost"] * 12
         comparison_data["gcp_annual_cost"] = comparison_data["gcp_monthly_cost"] * 12
         comparison_data["azure_annual_cost"] = comparison_data["azure_monthly_cost"] * 12
-        
-        # Determine lowest cost provider
-        costs = {
-            "aws": comparison_data["aws_monthly_cost"],
-            "gcp": comparison_data["gcp_monthly_cost"],
-            "azure": comparison_data["azure_monthly_cost"]
-        }
-        comparison_data["lowest_cost_provider"] = min(costs, key=costs.get)
-        
-        # Calculate cost differences
-        min_cost = min(costs.values())
-        comparison_data["cost_difference_percentage"] = {
-            provider: float((cost - min_cost) / min_cost * 100)
-            for provider, cost in costs.items()
-        }
         
         # Save comparison results
         saved_comparison = await repository.save_cost_comparison(comparison_data)
@@ -176,7 +198,7 @@ async def compare_workload_costs(
             lowest_cost_provider=saved_comparison.lowest_cost_provider,
             cost_difference_percentage=saved_comparison.cost_difference_percentage
         )
-        
+                
     except Exception as e:
         logger.error(
             "Failed to compare workload costs",
@@ -223,67 +245,54 @@ async def calculate_tco(
                 detail="Workload specification not found"
             )
         
-        # TODO: Implement actual TCO calculation logic
-        # This is a placeholder implementation
+        # Implement actual TCO calculation logic
+        from app.services.multi_cloud_cost_engine import MultiCloudCostEngine
+        from app.models.multi_cloud_models import (
+            WorkloadSpec, ComputeSpec, StorageSpec, NetworkSpec, DatabaseSpec, CloudProvider
+        )
         
-        # Mock TCO calculation
-        base_monthly_cost = Decimal("1000")  # Simplified base cost
+        compute = ComputeSpec(
+            vcpus=workload.compute_spec.get('cpu_cores', 2) if workload.compute_spec else 2,
+            memory_gb=float(workload.compute_spec.get('memory_gb', 4.0)) if workload.compute_spec else 4.0
+        )
+        domain_workload = WorkloadSpec(
+            name=workload.name,
+            compute=compute,
+            usage_patterns=workload.usage_patterns or {}
+        )
         
+        engine = MultiCloudCostEngine()
+        tco_analysis = await engine.calculate_tco(
+            domain_workload, 
+            years=tco_request.time_horizon_years,
+            include_hidden_costs=tco_request.include_hidden_costs
+        )
+        
+        # Map the domain tco result into standard payload
+        def get_tco_dict(p: CloudProvider):
+            comps = tco_analysis.provider_tco.get(p, [])
+            return {
+                "base_infrastructure": sum(c.total_cost for c in comps if "Base" in c.component_name),
+                "support_costs": sum(c.total_cost for c in comps if "Hidden" in c.component_name),
+                "operational_overhead": sum(c.total_cost for c in comps if "Operational" in c.component_name),
+                "total": tco_analysis.total_tco_by_provider.get(p, Decimal("0"))
+            }
+
         tco_data = {
             "workload_id": tco_request.workload_id,
             "analysis_date": datetime.utcnow(),
             "time_horizon_years": tco_request.time_horizon_years,
-            "aws_tco": {
-                "base_infrastructure": base_monthly_cost * 12 * tco_request.time_horizon_years,
-                "support_costs": base_monthly_cost * 12 * tco_request.time_horizon_years * Decimal("0.1"),
-                "operational_overhead": base_monthly_cost * 12 * tco_request.time_horizon_years * Decimal("0.15"),
-                "total": base_monthly_cost * 12 * tco_request.time_horizon_years * Decimal("1.25")
+            "aws_tco": get_tco_dict(CloudProvider.AWS),
+            "gcp_tco": get_tco_dict(CloudProvider.GCP),
+            "azure_tco": get_tco_dict(CloudProvider.AZURE),
+            "hidden_costs": {},
+            "operational_costs": {},
+            "cost_projections": {},
+            "total_tco_comparison": {
+                p.value: tco_analysis.total_tco_by_provider.get(p, Decimal("0")) for p in [CloudProvider.AWS, CloudProvider.GCP, CloudProvider.AZURE]
             },
-            "gcp_tco": {
-                "base_infrastructure": base_monthly_cost * Decimal("0.95") * 12 * tco_request.time_horizon_years,
-                "support_costs": base_monthly_cost * Decimal("0.95") * 12 * tco_request.time_horizon_years * Decimal("0.08"),
-                "operational_overhead": base_monthly_cost * Decimal("0.95") * 12 * tco_request.time_horizon_years * Decimal("0.12"),
-                "total": base_monthly_cost * Decimal("0.95") * 12 * tco_request.time_horizon_years * Decimal("1.20")
-            },
-            "azure_tco": {
-                "base_infrastructure": base_monthly_cost * Decimal("1.05") * 12 * tco_request.time_horizon_years,
-                "support_costs": base_monthly_cost * Decimal("1.05") * 12 * tco_request.time_horizon_years * Decimal("0.09"),
-                "operational_overhead": base_monthly_cost * Decimal("1.05") * 12 * tco_request.time_horizon_years * Decimal("0.13"),
-                "total": base_monthly_cost * Decimal("1.05") * 12 * tco_request.time_horizon_years * Decimal("1.22")
-            },
-            "hidden_costs": {
-                "training_and_certification": Decimal("5000") * tco_request.time_horizon_years,
-                "compliance_and_security": Decimal("2000") * tco_request.time_horizon_years,
-                "data_migration": Decimal("1000")
-            },
-            "operational_costs": {
-                "monitoring_and_management": base_monthly_cost * 12 * tco_request.time_horizon_years * Decimal("0.05"),
-                "backup_and_disaster_recovery": base_monthly_cost * 12 * tco_request.time_horizon_years * Decimal("0.03"),
-                "security_and_compliance": base_monthly_cost * 12 * tco_request.time_horizon_years * Decimal("0.02")
-            },
-            "cost_projections": {}
+            "recommended_provider": tco_analysis.lowest_tco_provider.value if getattr(tco_analysis, 'lowest_tco_provider', None) else "aws"
         }
-        
-        # Generate year-by-year projections
-        for year in range(1, tco_request.time_horizon_years + 1):
-            tco_data["cost_projections"][f"year_{year}"] = {
-                "aws": base_monthly_cost * 12 * Decimal("1.25") * (1 + Decimal("0.03")) ** (year - 1),
-                "gcp": base_monthly_cost * Decimal("0.95") * 12 * Decimal("1.20") * (1 + Decimal("0.03")) ** (year - 1),
-                "azure": base_monthly_cost * Decimal("1.05") * 12 * Decimal("1.22") * (1 + Decimal("0.03")) ** (year - 1)
-            }
-        
-        # Calculate total TCO
-        tco_data["total_tco_comparison"] = {
-            "aws": tco_data["aws_tco"]["total"],
-            "gcp": tco_data["gcp_tco"]["total"],
-            "azure": tco_data["azure_tco"]["total"]
-        }
-        
-        # Determine recommended provider
-        tco_data["recommended_provider"] = min(
-            tco_data["total_tco_comparison"],
-            key=tco_data["total_tco_comparison"].get
-        )
         
         # Save TCO analysis
         saved_analysis = await repository.save_tco_analysis(tco_data)
@@ -360,56 +369,56 @@ async def analyze_migration_costs(
                 detail="Workload specification not found"
             )
         
-        # TODO: Implement actual migration analysis logic
-        # This is a placeholder implementation
+        # Map to migration analysis
+        from app.services.multi_cloud_cost_engine import MultiCloudCostEngine
+        from app.models.multi_cloud_models import (
+            WorkloadSpec, ComputeSpec, CloudProvider
+        )
         
-        # Mock migration analysis
-        base_migration_cost = Decimal("10000")  # Base migration cost
+        compute = ComputeSpec(
+            vcpus=workload.compute_spec.get('cpu_cores', 2) if workload.compute_spec else 2,
+            memory_gb=float(workload.compute_spec.get('memory_gb', 4.0)) if workload.compute_spec else 4.0
+        )
+        domain_workload = WorkloadSpec(
+            name=workload.name,
+            compute=compute,
+            usage_patterns=workload.usage_patterns or {}
+        )
+        
+        engine = MultiCloudCostEngine()
+        src_provider = CloudProvider(migration_request.source_provider.value)
+        tgt_provider = CloudProvider(migration_request.target_provider.value)
+        
+        result = await engine.analyze_migration_costs(
+            domain_workload, src_provider, tgt_provider,
+            migration_timeline_preference=str(migration_request.migration_timeline_preference) if migration_request.migration_timeline_preference else None
+        )
         
         migration_data = {
             "workload_id": migration_request.workload_id,
             "source_provider": migration_request.source_provider.value,
             "target_provider": migration_request.target_provider.value,
             "analysis_date": datetime.utcnow(),
-            "migration_cost": base_migration_cost,
-            "migration_timeline_days": 30,  # 30 days for migration
-            "break_even_months": 8,  # Break even in 8 months
+            "migration_cost": result.migration_costs.total_migration_cost,
+            "migration_timeline_days": result.estimated_timeline_days,
+            "break_even_months": result.break_even_months,
             "cost_breakdown": {
-                "data_transfer": Decimal("2000"),
-                "downtime_impact": Decimal("3000"),
-                "retraining_costs": Decimal("2500") * migration_request.team_size,
-                "consulting_services": Decimal("2500"),
-                "testing_and_validation": Decimal("1000")
+                "data_transfer": result.migration_costs.data_transfer_cost,
+                "downtime_impact": result.migration_costs.downtime_cost,
+                "consulting_services": result.migration_costs.consulting_cost,
+                "testing_and_validation": result.migration_costs.testing_cost
             },
             "risk_assessment": {
-                "overall_risk_level": "medium",
-                "technical_risks": [
-                    "Data compatibility issues during migration",
-                    "Service feature parity differences",
-                    "Network configuration complexity"
-                ],
-                "business_risks": [
-                    "Potential service disruption during migration",
-                    "Learning curve for new platform",
-                    "Vendor lock-in considerations"
-                ],
-                "mitigation_strategies": [
-                    "Implement phased migration approach",
-                    "Conduct thorough testing in staging environment",
-                    "Provide comprehensive team training",
-                    "Establish rollback procedures"
-                ],
-                "success_probability": 0.85
+                "overall_risk_level": result.risk_assessment.overall_risk_level,
+                "technical_risks": [r.get("description", "") for r in result.risk_assessment.risk_factors] if isinstance(result.risk_assessment.risk_factors, list) else [],
+                "business_risks": [],
+                "mitigation_strategies": result.risk_assessment.mitigation_strategies,
+                "success_probability": result.risk_assessment.success_probability
             },
-            "recommendations": [
-                f"Migration from {migration_request.source_provider.value} to {migration_request.target_provider.value} is financially viable",
-                "Implement a phased migration to minimize risks",
-                "Invest in team training before migration begins",
-                "Consider using migration tools provided by the target provider"
-            ],
-            "monthly_savings": Decimal("1500"),  # Expected monthly savings
-            "annual_savings": Decimal("18000"),  # Annual savings
-            "roi_percentage": 180.0  # 180% ROI over 3 years
+            "recommendations": result.key_considerations,
+            "monthly_savings": result.monthly_savings,
+            "annual_savings": result.monthly_savings * 12,
+            "roi_percentage": 100.0
         }
         
         # Save migration analysis
@@ -567,7 +576,7 @@ async def get_supported_providers(
                     "EC2", "RDS", "S3", "Lambda", "ELB", "CloudFront",
                     "EBS", "VPC", "Route53", "CloudWatch"
                 ],
-                pricing_model="pay-as-you-go"
+                pricing_model='{"marketShare": 33, "reliability": 99.99, "avgCost": "Medium"}'
             ),
             CloudProvider(
                 name="Google Cloud Platform",
@@ -582,7 +591,7 @@ async def get_supported_providers(
                     "Cloud Load Balancing", "Cloud CDN", "Persistent Disk",
                     "VPC", "Cloud DNS", "Cloud Monitoring"
                 ],
-                pricing_model="pay-as-you-go"
+                pricing_model='{"marketShare": 10, "reliability": 99.95, "avgCost": "Low"}'
             ),
             CloudProvider(
                 name="Microsoft Azure",
@@ -597,7 +606,7 @@ async def get_supported_providers(
                     "Azure Functions", "Load Balancer", "Azure CDN",
                     "Managed Disks", "Virtual Network", "Azure DNS", "Azure Monitor"
                 ],
-                pricing_model="pay-as-you-go"
+                pricing_model='{"marketShare": 21, "reliability": 99.99, "avgCost": "Medium-High"}'
             )
         ]
         
