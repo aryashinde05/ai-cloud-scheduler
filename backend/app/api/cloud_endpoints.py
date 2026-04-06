@@ -170,7 +170,8 @@ async def register_cloud_provider(
             current_user.id
         )
         
-        return CloudProviderResponse.from_orm(db_provider)
+        # Pydantic v2: use model_validate (from_attributes=True) instead of from_orm.
+        return CloudProviderResponse.model_validate(db_provider)
     
     except ValueError as e:
         raise HTTPException(
@@ -213,7 +214,7 @@ async def list_cloud_providers(
             
             total_cost = sum(item['total_cost'] for item in cost_summary)
             
-            provider_response = CloudProviderResponse.from_orm(provider)
+            provider_response = CloudProviderResponse.model_validate(provider)
             provider_response.total_monthly_cost = total_cost
             enhanced_providers.append(provider_response)
         
@@ -250,7 +251,8 @@ async def get_cloud_provider(
                 detail="Access denied"
             )
         
-        return CloudProviderResponse.from_orm(provider)
+        # Pydantic v2: use model_validate (from_attributes=True) instead of from_orm.
+        return CloudProviderResponse.model_validate(provider)
     
     except HTTPException:
         raise

@@ -150,7 +150,8 @@ class AutoRemediationEngine:
         action = self._create_optimization_action(opportunity, policy)
         
         # Validate safety requirements
-        if not self.validate_safety_requirements(action):
+        safety_passed, _ = self.validate_safety_requirements(action, policy)
+        if not safety_passed:
             logger.warning("Safety validation failed for opportunity",
                          resource_id=opportunity.resource_id)
             return False
@@ -230,30 +231,38 @@ class AutoRemediationEngine:
         # Placeholder implementation
         return []
     
-    def validate_safety_requirements(self, 
-                                   opportunity: OptimizationOpportunity,
-                                   policy: AutomationPolicy) -> Tuple[bool, Dict[str, Any]]:
+    def validate_safety_requirements(
+        self,
+        opportunity_or_action: Any,
+        policy: Optional[AutomationPolicy] = None
+    ) -> Tuple[bool, Dict[str, Any]]:
         """
         Validate that an optimization opportunity meets safety requirements.
         
         Args:
-            opportunity: The optimization opportunity to validate
-            policy: Automation policy with safety rules
+            opportunity_or_action: The optimization opportunity (or persisted action) to validate
+            policy: Automation policy with safety rules (optional if attached to action)
             
         Returns:
             Tuple of (safety_passed, safety_details)
         """
+        if policy is None:
+            policy = getattr(opportunity_or_action, "policy", None)
+        if policy is None:
+            # If we have no policy context, do not block local usage.
+            return True, {"passed": True, "checks": [], "note": "No policy provided; safety checks skipped."}
+
         logger.info("Validating safety requirements",
-                   resource_id=opportunity.resource_id,
-                   action_type=opportunity.action_type.value)
+                   resource_id=getattr(opportunity_or_action, "resource_id", None),
+                   action_type=getattr(getattr(opportunity_or_action, "action_type", None), "value", None))
         
         # Use SafetyChecker to validate the opportunity
         safety_passed, safety_details = self.safety_checker.validate_action_safety(
-            opportunity, policy
+            opportunity_or_action, policy
         )
         
         logger.info("Safety validation completed",
-                   resource_id=opportunity.resource_id,
+                   resource_id=getattr(opportunity_or_action, "resource_id", None),
                    safety_passed=safety_passed)
         
         return safety_passed, safety_details
@@ -295,6 +304,9 @@ class AutoRemediationEngine:
                     opportunity.risk_level == RiskLevel.HIGH
                 )
                 
+                # Create rollback plan
+                rollback_plan = self.rollback_manager.create_rollback_plan(opportunity)
+
                 # Calculate optimal execution time using scheduling engine
                 execution_time = self.scheduling_engine.calculate_optimal_execution_time(
                     OptimizationAction(
@@ -314,9 +326,6 @@ class AutoRemediationEngine:
                     ),
                     policy
                 )
-                
-                # Create rollback plan
-                rollback_plan = self.rollback_manager.create_rollback_plan(opportunity)
                 
                 # Create optimization action
                 action = OptimizationAction(

@@ -459,6 +459,7 @@ const InfrastructureAnalysis: React.FC = () => {
   const [ebs, setEbs] = useState<EBSVolume[]>([]);
   const [rds, setRds] = useState<RDSInstance[]>([]);
   const [selectedRegion, setSelectedRegion] = useState<string>('all');
+  const [defaultRegion, setDefaultRegion] = useState<string | null>(null);
   const [availableRegions, setAvailableRegions] = useState<string[]>([]);
   const [awsError, setAwsError] = useState<string | null>(null);
 
@@ -480,8 +481,10 @@ const InfrastructureAnalysis: React.FC = () => {
     try {
       const statusRes = await api.get('/api/v1/aws/status');
       statusConnected = statusRes.data?.connected === true;
+      setDefaultRegion(statusRes.data?.region ?? null);
     } catch {
       // backend unreachable
+      setDefaultRegion(null);
     }
 
     if (!statusConnected) {
@@ -653,13 +656,13 @@ const InfrastructureAnalysis: React.FC = () => {
       {!awsError && !isDemo && (
         <Alert severity="success" sx={{ mb: 3 }}>
           {selectedRegion === 'all'
-            ? `Scanned all regions. Found resources in: ${availableRegions.join(', ') || 'none yet'}.`
+            ? `Showing resources in default region${defaultRegion ? ` (${defaultRegion})` : ''}. Found: ${availableRegions.join(', ') || 'none yet'}.`
             : `Showing resources in ${selectedRegion}.`}
         </Alert>
       )}
       {ec2.length === 0 && ebs.length === 0 && !awsError && !loading && (
         <Alert severity="warning" sx={{ mb: 3 }}>
-          No resources found. The scan covers all AWS regions automatically — if you still see nothing, check that your IAM credentials have <strong>ec2:DescribeInstances</strong> permission.
+          No resources found. The scan covers the default region automatically — if you still see nothing, check that your IAM credentials have <strong>ec2:DescribeInstances</strong> permission.
         </Alert>
       )}
 

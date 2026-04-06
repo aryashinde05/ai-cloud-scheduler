@@ -19,15 +19,19 @@ from app.models.aws_account import AwsAccount
 router = APIRouter(prefix="/scaling-rules", tags=["Auto-Scaling Rules"])
 
 
+_SCALING_ENGINE_CACHE: Dict[str, ScalingRulesEngine] = {}
+
 def get_engine(db: Session = None) -> ScalingRulesEngine:
     """Build ScalingRulesEngine using stored AWS credentials if available."""
     boto3_session = None
     region = "us-east-1"
+    cache_key = f"none|{region}"
     if db:
         account = AwsAccount.get_default(db)
         if account:
             try:
                 access_key, secret_key, acct_region = account.get_decrypted_credentials()
+                cache_key = f"account:{account.id}|{acct_region}"
                 boto3_session = boto3.Session(
                     aws_access_key_id=access_key,
                     aws_secret_access_key=secret_key,
@@ -38,7 +42,12 @@ def get_engine(db: Session = None) -> ScalingRulesEngine:
                 pass
     if boto3_session is None:
         boto3_session = boto3.Session(region_name=region)
-    return ScalingRulesEngine(boto3_session=boto3_session, region=region)
+    if cache_key in _SCALING_ENGINE_CACHE:
+        return _SCALING_ENGINE_CACHE[cache_key]
+
+    engine = ScalingRulesEngine(boto3_session=boto3_session, region=region)
+    _SCALING_ENGINE_CACHE[cache_key] = engine
+    return engine
 
 
 # ── Pydantic Models ────────────────────────────────────────

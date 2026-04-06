@@ -20,7 +20,13 @@ from app.database.database import get_db_session
 from sqlalchemy.orm import Session
 
 # JWT Configuration
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", secrets.token_urlsafe(32))
+# The codebase historically had two auth implementations:
+# - `app.api.auth_endpoints` (uses `SECRET_KEY`)
+# - this module (uses `JWT_SECRET_KEY`)
+#
+# For a working demo, default `JWT_SECRET_KEY` to `SECRET_KEY` so tokens issued by
+# `/auth/login` can authenticate protected endpoints that depend on `get_current_user`.
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY") or os.getenv("SECRET_KEY") or secrets.token_urlsafe(32)
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 REFRESH_TOKEN_EXPIRE_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
@@ -35,10 +41,10 @@ class TokenPayload(BaseModel):
     """JWT token payload structure"""
     sub: str  # user_id
     email: str
-    role: str
+    role: str = "viewer"
     exp: int
     iat: int
-    type: str  # 'access' or 'refresh'
+    type: str = "access"  # 'access' or 'refresh'
 
 class TokenResponse(BaseModel):
     """Token response model"""
@@ -119,10 +125,20 @@ class AuthenticationService:
             
             payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
             
-            # Validate required fields
-            if not all(key in payload for key in ["sub", "email", "role", "exp", "type"]):
+            # Support both token shapes:
+            # - full payload created by this module (includes role/type/iat)
+            # - minimal payload created by `app.api.auth_endpoints` (sub/email/exp)
+            if not all(key in payload for key in ["sub", "email", "exp"]):
                 return None
-            
+
+            # Fill defaults if missing
+            if "iat" not in payload:
+                payload["iat"] = int(datetime.utcnow().timestamp())
+            if "role" not in payload:
+                payload["role"] = "viewer"
+            if "type" not in payload:
+                payload["type"] = "access"
+
             return TokenPayload(**payload)
         except jwt.ExpiredSignatureError:
             return None
@@ -243,16 +259,16 @@ async def get_current_user(
     
     # Demo mode bypass - if no credentials provided or demo mode enabled
     if os.getenv("DEMO_MODE", "false").lower() == "true" or credentials is None:
-        # Return a demo user with correct fields and proper UUID
+        # Return an in-memory demo user. This is not persisted to the DB.
         from uuid import UUID
         demo_user = User(
-            # id=UUID("00000000-0000-0000-0000-000000000000"),
-            # email="demo@example.com",
-            # password_hash="demo_hash",
-            # first_name="Demo",
-            # last_name="User",
-            # role=UserRole.ADMIN,
-            # is_active=True
+            id=UUID("00000000-0000-0000-0000-000000000000"),
+            email="demo@example.com",
+            password_hash="demo_hash",
+            first_name="Demo",
+            last_name="User",
+            role=UserRole.ADMIN,
+            is_active=True,
         )
         return demo_user
     

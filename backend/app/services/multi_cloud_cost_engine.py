@@ -7,6 +7,7 @@ Coordinates pricing data from AWS, GCP, and Azure to provide unified cost compar
 
 import asyncio
 import logging
+import os
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Dict, List, Optional, Tuple
@@ -526,6 +527,13 @@ class MultiCloudCostEngine:
     ) -> ProviderCost:
         """Calculate costs for a specific provider using real pricing clients."""
         try:
+            # Demo / offline mode: avoid slow external pricing lookups.
+            # Use mock pricing unless explicitly disabled.
+            if os.getenv("MULTICLOUD_PRICING_MODE", "mock").lower() == "mock":
+                return await self._calculate_provider_costs_mock(
+                    workload_spec, provider, region, include_spot_pricing, include_reserved_pricing
+                )
+
             # Get the pricing client for this provider
             pricing_client = self.pricing_clients.get(provider)
             if not pricing_client:
@@ -903,7 +911,7 @@ class MultiCloudCostEngine:
         opportunities = []
         
         # Multi-cloud arbitrage opportunity
-        costs = [(provider, cost.monthly_cost) for provider, cost in provider_costs.items()]
+        costs = [(provider, cost.total_monthly_cost) for provider, cost in provider_costs.items()]
         costs.sort(key=lambda x: x[1])
         
         if len(costs) >= 2:

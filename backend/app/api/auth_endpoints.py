@@ -140,7 +140,8 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
     db.commit()
 
     token = create_access_token({"sub": str(user.id), "email": user.email})
-    return TokenResponse(access_token=token, user=UserOut.from_orm(user))
+    # Pydantic v2: use model_validate (from_attributes=True) instead of from_orm.
+    return TokenResponse(access_token=token, user=UserOut.model_validate(user))
 
 
 @auth_router.get("/me", response_model=UserOut)

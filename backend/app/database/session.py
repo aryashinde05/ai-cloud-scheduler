@@ -7,7 +7,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Use the synchronous DATABASE_URL from .env
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+if not SQLALCHEMY_DATABASE_URL:
+    # Safe local default so the backend boots out-of-the-box.
+    # Can be overridden by setting DATABASE_URL in `.env`.
+    SQLALCHEMY_DATABASE_URL = "sqlite:///./finops.db"
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,

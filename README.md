@@ -61,10 +61,21 @@
 ### Prerequisites
 - **Node.js** 16+ & **npm**
 - **Python** 3.10+
-- **AWS/Azure Account** with appropriate API access
+- (Optional) **AWS/Azure Account** with appropriate API access (only needed for live cloud sync)
 
 ### 1. Setup Environment
-Create a `.env` file in the root directory (refer to `.env.example` if available) with your cloud credentials:
+Copy the example env files and edit as needed:
+
+- Root env (recommended): copy `.env.example` → `.env`
+- Or backend-only env: copy `backend/.env.example` → `backend/.env`
+- Frontend env: copy `frontend/.env.example` → `frontend/.env`
+
+At minimum, for local development you only need:
+- `DATABASE_URL` (defaults to `sqlite:///./finops.db` if not set)
+- `SECRET_KEY` (JWT signing key for `/auth/*`)
+- `CORS_ORIGINS` (defaults to `http://localhost:3000`)
+
+Optional cloud credentials (only needed for live AWS/Azure calls):
 ```bash
 AWS_ACCESS_KEY_ID=...
 AWS_SECRET_ACCESS_KEY=...
@@ -91,6 +102,16 @@ cd frontend
 npm install
 npm start
 ```
+
+### Default Local URLs
+- **Backend API**: `http://localhost:8000`
+- **API Docs (Swagger)**: `http://localhost:8000/docs`
+- **Frontend**: `http://localhost:3000`
+
+### Auth (Register/Login) flow
+- Register: `POST /auth/register`
+- Login: `POST /auth/login`
+- Current user: `GET /auth/me` (send `Authorization: Bearer <token>`)
 
 ---
 

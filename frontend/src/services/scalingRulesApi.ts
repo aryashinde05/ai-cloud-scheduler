@@ -1,12 +1,6 @@
 // Scaling Rules API service — communicates with backend scaling-rules endpoints
-import axios from 'axios';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-
-const api = axios.create({
-    baseURL: API_BASE_URL,
-    timeout: 30000,
-});
+// Uses the shared axios instance so auth headers, interceptors, and retries apply.
+import { api } from './api';
 
 // ── Types ──────────────────────────────────────────────
 

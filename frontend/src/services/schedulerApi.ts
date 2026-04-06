@@ -1,12 +1,6 @@
 // Scheduler API service — communicates with backend scheduler endpoints
-import axios from 'axios';
-
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:8000';
-
-const api = axios.create({
-    baseURL: API_BASE_URL,
-    timeout: 30000,
-});
+// Uses the shared axios instance so auth headers, interceptors, and retries apply.
+import { api } from './api';
 
 // Types
 export interface SchedulableResource {
@@ -162,7 +156,7 @@ export const schedulerApi = {
 
     // Actions
     async executeAction(actionType: string, resourceId: string): Promise<ActionResult> {
-        const response = await api.post('/api/actions/execute', {
+        const response = await api.post('/api/scheduler/actions/execute', {
             action_type: actionType,
             resource_id: resourceId,
         });
@@ -170,7 +164,7 @@ export const schedulerApi = {
     },
 
     async getActionHistory(): Promise<ActionResult[]> {
-        const response = await api.get('/api/actions/history');
+        const response = await api.get('/api/scheduler/actions/history');
         return response.data.history || [];
     },
 };

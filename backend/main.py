@@ -37,11 +37,6 @@ from app.api.webhook_endpoints import router as webhook_router
 from app.api.automation_endpoints import router as automation_router
 from app.api.anomaly_detection import router as anomaly_detection_router
 from app.api.multi_cloud import router as multi_cloud_router
-from app.api.graph_neural_network_endpoints import router as gnn_router
-from app.api.ai_system_monitoring_endpoints import router as ai_monitoring_router
-from app.api.collaboration_endpoints import router as collaboration_router
-from app.api.communication_endpoints import router as communication_router
-from app.api.video_endpoints import router as video_router
 from app.api.onboarding import router as onboarding_router
 from app.api.scheduler_endpoints import router as scheduler_router
 from app.api.scaling_rules_endpoints import router as scaling_rules_router
@@ -50,6 +45,20 @@ from app.api.budgets_endpoints import router as budgets_router
 from app.api.compliance_endpoints import router as compliance_router
 from app.api.reports_endpoints import router as reports_router
 from app.api.automation_stats_endpoints import router as automation_stats_router
+
+# Optional routers (some repos/branches omit these modules)
+def _optional_router(import_path: str, attr: str = "router"):
+    try:
+        module = __import__(import_path, fromlist=[attr])
+        return getattr(module, attr)
+    except Exception:
+        return None
+
+gnn_router = _optional_router("app.api.graph_neural_network_endpoints", "router")
+ai_monitoring_router = _optional_router("app.api.ai_system_monitoring_endpoints", "router")
+collaboration_router = _optional_router("app.api.collaboration_endpoints", "router")
+communication_router = _optional_router("app.api.communication_endpoints", "router")
+video_router = _optional_router("app.api.video_endpoints", "router")
 
 # Migration Advisor routers
 try:
@@ -241,6 +250,11 @@ app.include_router(scheduler_router, prefix="/api")
 app.include_router(scaling_rules_router, prefix="/api/v1")
 app.include_router(resources_router)
 app.include_router(ai_assistant_router)
+
+# Optional feature routers (loaded only if present)
+for _r in [gnn_router, ai_monitoring_router, collaboration_router, communication_router, video_router]:
+    if _r is not None:
+        app.include_router(_r)
 
 # Migration Advisor
 if _migration_routers_loaded:

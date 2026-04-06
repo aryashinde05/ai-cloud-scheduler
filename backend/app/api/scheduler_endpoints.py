@@ -16,6 +16,8 @@ router = APIRouter(
     tags=["scheduler"]
 )
 
+_SCHEDULER_SERVICE_CACHE: Dict[str, SchedulerService] = {}
+
 class ScheduleCreateRequest(BaseModel):
     instance_id: str
     instance_name: Optional[str] = None
@@ -34,14 +36,26 @@ class ScheduleUpdateRequest(BaseModel):
     days: Optional[List[str]] = None
     estimated_monthly_savings: Optional[float] = None
 
+
+class SchedulerActionExecuteRequest(BaseModel):
+    """
+    Execute a start/stop action for a schedulable resource.
+    Expected by the frontend Smart Scheduler UI.
+    """
+    action_type: str  # "start" | "stop"
+    resource_id: str  # e.g. i-123..., or DB identifier
+
 def get_scheduler_service(db: Session = None):
     """Build SchedulerService using stored AWS credentials if available."""
     session = None
+    region = "us-east-1"
+    cache_key = f"none|{region}"
     if db:
         account = AwsAccount.get_default(db)
         if account:
             try:
                 access_key, secret_key, region = account.get_decrypted_credentials()
+                cache_key = f"account:{account.id}|{region}"
                 session = boto3.Session(
                     aws_access_key_id=access_key,
                     aws_secret_access_key=secret_key,
@@ -51,7 +65,14 @@ def get_scheduler_service(db: Session = None):
                 pass
     if session is None:
         session = boto3.Session(region_name="us-east-1")
-    return SchedulerService(boto3_session=session)
+
+    # Reuse in-memory scheduler state across requests (demo UX).
+    if cache_key in _SCHEDULER_SERVICE_CACHE:
+        return _SCHEDULER_SERVICE_CACHE[cache_key]
+
+    service = SchedulerService(boto3_session=session, region=region)
+    _SCHEDULER_SERVICE_CACHE[cache_key] = service
+    return service
 
 @router.get("/resources")
 async def get_schedulable_resources(
@@ -156,3 +177,24 @@ async def get_projected_savings(
         "actions_executed": summary.get("actions_executed", 0),
         "success_rate": summary.get("success_rate", 100),
     }
+
+
+@router.post("/actions/execute")
+async def execute_scheduler_action(
+    request: SchedulerActionExecuteRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Execute start/stop on the given resource."""
+    service = get_scheduler_service(db)
+    return service.execute_action(instance_id=request.resource_id, action=request.action_type)
+
+
+@router.get("/actions/history")
+async def get_action_history(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return execution history for the scheduler actions."""
+    service = get_scheduler_service(db)
+    return {"history": service.get_action_history()}

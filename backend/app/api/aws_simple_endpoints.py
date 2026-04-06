@@ -35,7 +35,8 @@ class ResourceOut(BaseModel):
     monthly_cost: float | None = None
 
     class Config:
-        orm_mode = True
+        # Pydantic v2: replace orm_mode with from_attributes
+        from_attributes = True
 
 
 router = APIRouter(prefix="/api/v1/aws", tags=["AWS Connection"])
@@ -45,10 +46,24 @@ router = APIRouter(prefix="/api/v1/aws", tags=["AWS Connection"])
 def aws_status(db: Session = Depends(get_db)):
     """Return whether AWS account is configured. Used by frontend to gate access."""
     account = AwsAccount.get_default(db)
+    if not account:
+        return {
+            "connected": False,
+            "region": None,
+            "account_id": None,
+        }
+
+    # Treat the account as connected only when decrypted credentials are non-empty.
+    try:
+        access_key, secret_key, _region = account.get_decrypted_credentials()
+        has_creds = bool(access_key and secret_key)
+    except Exception:
+        has_creds = False
+
     return {
-        "connected": account is not None,
+        "connected": has_creds,
         "region": account.region if account else None,
-        "account_id": str(account.aws_account_id) if account and hasattr(account, 'aws_account_id') else str(account.id) if account else None
+        "account_id": str(account.aws_account_id) if account and hasattr(account, 'aws_account_id') else str(account.id) if account else None,
     }
 
 
@@ -58,6 +73,16 @@ def connect_aws_account(payload: AwsConnectRequest, db: Session = Depends(get_db
     Store AWS account credentials (encrypted) for subsequent Boto3 calls.
     """
     region = (payload.region or "").strip()
+    access_key = (payload.access_key or "").strip()
+    secret_key = (payload.secret_key or "").strip()
+
+    # Fail fast: avoid saving empty credentials that later cause long AWS timeouts.
+    if not access_key or not secret_key:
+        raise HTTPException(
+            status_code=400,
+            detail="AWS credentials are required (access_key and secret_key).",
+        )
+
     # Guard against typos like "ap-sutheast-2" (missing 'o')
     valid_regions = set(boto3.session.Session().get_available_regions("ec2"))
     if region not in valid_regions:
@@ -67,8 +92,8 @@ def connect_aws_account(payload: AwsConnectRequest, db: Session = Depends(get_db
         )
     account = AwsAccount.create_or_update_default(
         db=db,
-        access_key=(payload.access_key or "").strip(),
-        secret_key=(payload.secret_key or "").strip(),
+        access_key=access_key,
+        secret_key=secret_key,
         region=region,
     )
     return {"message": "AWS account connected successfully", "account_id": account.id}
@@ -77,18 +102,30 @@ def connect_aws_account(payload: AwsConnectRequest, db: Session = Depends(get_db
 @router.get("/resources", response_model=List[ResourceOut])
 def get_resources(region: str = None, db: Session = Depends(get_db)):
     """
-    Refresh and return all resources. Scans ALL regions by default.
-    Pass ?region=us-east-1 to limit to a single region.
+    Refresh and return resources.
+
+    Demo-safe default:
+    - if `?region` is omitted, scan only the account's configured default region.
+    - pass `?region=all` to scan ALL regions.
+    - pass `?region=us-east-1` to scan a single region.
     """
     account = AwsAccount.get_default(db)
     if not account:
         raise HTTPException(status_code=400, detail="AWS account not configured. Connect first.")
 
     try:
-        regions = [region] if region else None
+        # When the frontend uses selectedRegion="all", it omits the query param.
+        # In that case, avoid scanning ALL regions (can exceed frontend timeouts).
+        if not region:
+            regions = [account.region]
+        elif region == "all":
+            regions = None
+        else:
+            regions = [region]
+
         aws_collector.refresh_resources(db=db, account=account, regions=regions)
         query = db.query(Resource).filter(Resource.aws_account_id == account.id)
-        if region:
+        if region and region != "all":
             query = query.filter(Resource.region == region)
         resources = query.order_by(Resource.resource_type, Resource.resource_id).all()
         return [
@@ -128,8 +165,8 @@ def get_instances(db: Session = Depends(get_db)):
 
 
 @router.get("/rds", response_model=List[ResourceOut])
-def get_rds_instances(db: Session = Depends(get_db)):
-    """Fetch real RDS instances across all regions."""
+def get_rds_instances(region: str = None, db: Session = Depends(get_db)):
+    """Fetch real RDS instances (demo-safe default: only account default region)."""
     account = AwsAccount.get_default(db)
     if not account:
         raise HTTPException(status_code=400, detail="AWS account not configured.")
@@ -149,7 +186,8 @@ def get_rds_instances(db: Session = Depends(get_db)):
     session = boto3.Session(aws_access_key_id=access_key, aws_secret_access_key=secret_key)
 
     results = []
-    for region in ALL_REGIONS:
+    target_regions = ALL_REGIONS if region == "all" else [region] if region else [account.region]
+    for region in target_regions:
         try:
             rds_client = session.client("rds", region_name=region, config=cfg)
             cw = session.client("cloudwatch", region_name=region, config=cfg)
