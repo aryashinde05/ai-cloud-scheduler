@@ -40,9 +40,9 @@ class SchedulerService:
     idle windows, creates schedules, and executes start/stop actions.
     """
 
-    def __init__(self, boto3_session, region: str = "us-east-1"):
+    def __init__(self, boto3_session, region: str | None = None):
         self.session = boto3_session
-        self.region = region
+        self.region = region or os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION") or "ap-south-1"
         # In-memory stores (MVP — production would use a DB)
         self._schedules: Dict[str, Dict[str, Any]] = {}
         self._action_history: List[Dict[str, Any]] = []
@@ -56,28 +56,46 @@ class SchedulerService:
         """List EC2 and RDS instances with basic CloudWatch usage data."""
         resources = []
         try:
-            ec2 = self.session.client("ec2")
-            rds = self.session.client("rds")
-            cw = self.session.client("cloudwatch")
-            
-            # --- 1. Fetch EC2 Instances ---
+            ec2 = self.session.client("ec2", region_name=self.region)
+            rds = self.session.client("rds", region_name=self.region)
+            cw = self.session.client("cloudwatch", region_name=self.region)
+
+            instance_ids_log: List[str] = []
+
+            # --- 1. Fetch EC2 Instances (running / stopped only) ---
             paginator = ec2.get_paginator("describe_instances")
             for page in paginator.paginate():
                 for reservation in page.get("Reservations", []):
                     for inst in reservation.get("Instances", []):
+                        state = inst.get("State", {}).get("Name", "unknown")
+                        if state not in ("running", "stopped"):
+                            continue
+
                         instance_id = inst["InstanceId"]
                         instance_type = inst.get("InstanceType", "unknown")
-                        state = inst.get("State", {}).get("Name", "unknown")
                         name = ""
-                        for tag in inst.get("Tags", []):
-                            if tag["Key"] == "Name":
-                                name = tag["Value"]
-                                break
+                        tag_map: Dict[str, str] = {}
+                        for tag in inst.get("Tags", []) or []:
+                            if tag.get("Key") == "Name":
+                                name = tag.get("Value") or ""
+                            if tag.get("Key"):
+                                tag_map[tag["Key"]] = tag.get("Value") or ""
+                        do_not_schedule = (tag_map.get("DoNotSchedule") or "").strip().lower() in {"true", "1", "yes"}
+
+                        instance_ids_log.append(instance_id)
 
                         avg_cpu = self._get_avg_cpu(cw, "AWS/EC2", "InstanceId", instance_id, hours=24)
                         sparkline = self._get_cpu_sparkline(cw, "AWS/EC2", "InstanceId", instance_id, days=7)
                         hourly_cost = INSTANCE_PRICING.get(instance_type, DEFAULT_HOURLY_RATE)
                         monthly_cost = round(hourly_cost * 730, 2)
+
+                        cost_thr = float(os.getenv("SCHEDULER_COST_STOP_THRESHOLD", "0.10"))
+                        cost_stop_suggested = (
+                            state == "running"
+                            and avg_cpu < 5.0
+                            and hourly_cost >= cost_thr
+                            and not do_not_schedule
+                        )
 
                         existing_schedule = next((s["id"] for s in self._schedules.values() if s["instance_id"] == instance_id), None)
 
@@ -91,10 +109,15 @@ class SchedulerService:
                             "avg_cpu_24h": avg_cpu,
                             "cpu_sparkline": sparkline,
                             "hourly_cost": hourly_cost,
+                            "estimated_hourly_cost": hourly_cost,
                             "monthly_cost": monthly_cost,
                             "schedule_id": existing_schedule,
+                            "do_not_schedule": do_not_schedule,
+                            "cost_stop_suggested": cost_stop_suggested,
                             "launch_time": inst.get("LaunchTime", "").isoformat() if hasattr(inst.get("LaunchTime", ""), "isoformat") else str(inst.get("LaunchTime", "")),
                         })
+
+            print("Instances fetched:", instance_ids_log)
                         
             # --- 2. Fetch RDS Instances ---
             try:
@@ -252,7 +275,7 @@ class SchedulerService:
         """
         try:
             cw = self.session.client("cloudwatch")
-            ec2 = self.session.client("ec2")
+            ec2 = self.session.client("ec2", region_name=self.region)
 
             is_ec2 = instance_id.startswith("i-")
             
@@ -632,7 +655,7 @@ class SchedulerService:
             is_ec2 = instance_id.startswith("i-")
             
             if is_ec2:
-                ec2 = self.session.client("ec2")
+                ec2 = self.session.client("ec2", region_name=self.region)
                 if action == "stop":
                     ec2.stop_instances(InstanceIds=[instance_id])
                     result["status"] = "success"
@@ -674,7 +697,7 @@ class SchedulerService:
             "message": "",
         }
         try:
-            ec2 = self.session.client("ec2")
+            ec2 = self.session.client("ec2", region_name=self.region)
             ec2.delete_volume(VolumeId=volume_id)
             result["status"] = "success"
             result["message"] = f"Volume {volume_id} deleted successfully"
@@ -696,7 +719,7 @@ class SchedulerService:
             "message": "",
         }
         try:
-            ec2 = self.session.client("ec2")
+            ec2 = self.session.client("ec2", region_name=self.region)
             ec2.release_address(AllocationId=allocation_id)
             result["status"] = "success"
             result["message"] = f"Elastic IP {allocation_id} released successfully"

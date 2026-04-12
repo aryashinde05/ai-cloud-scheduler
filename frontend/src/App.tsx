@@ -24,6 +24,7 @@ const ServiceSelection = lazy(() => import('./pages/ServiceSelection'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const AwsDashboard = lazy(() => import('./pages/AwsDashboard'));
 const CostAnalysis = lazy(() => import('./pages/CostAnalysis'));
+const CostExplorer = lazy(() => import('./pages/CostExplorer'));
 const BudgetManagement = lazy(() => import('./pages/BudgetManagement'));
 const Optimization = lazy(() => import('./pages/Optimization'));
 const Reports = lazy(() => import('./pages/Reports'));
@@ -192,6 +193,7 @@ function App() {
                     <Route path="/scheduler" element={<ProtectedDashboard><SchedulerDashboard /></ProtectedDashboard>} />
                     <Route path="/scaling-rules" element={<ProtectedDashboard><ScalingRules /></ProtectedDashboard>} />
                     <Route path="/cost-analysis" element={<ProtectedDashboard><CostAnalysis /></ProtectedDashboard>} />
+                    <Route path="/cost-explorer" element={<ProtectedDashboard><CostExplorer /></ProtectedDashboard>} />
                     <Route path="/budgets" element={<ProtectedDashboard><BudgetManagement /></ProtectedDashboard>} />
                     <Route path="/optimization" element={<ProtectedDashboard><Optimization /></ProtectedDashboard>} />
                     <Route path="/reports" element={<ProtectedDashboard><Reports /></ProtectedDashboard>} />

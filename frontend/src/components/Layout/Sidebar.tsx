@@ -66,6 +66,7 @@ const menuSections: MenuSection[] = [
     label: 'Cost Management',
     items: [
       { text: 'Cost Analysis', icon: <TrendingUpIcon />, path: '/cost-analysis' },
+      { text: 'Cost Explorer', icon: <InsightsIcon />, path: '/cost-explorer', awsOnly: true },
       { text: 'Budgets', icon: <BudgetIcon />, path: '/budgets' },
       { text: 'Alerts', icon: <AlertsIcon />, path: '/alerts' },
     ],

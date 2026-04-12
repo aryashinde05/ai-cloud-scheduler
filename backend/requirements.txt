@@ -51,6 +51,9 @@ hypothesis
 stable-baselines3
 gymnasium
 
+# Job scheduling (Smart Scheduler)
+APScheduler>=3.10.0
+
 # Utilities
 pydantic-settings
 python-dotenv

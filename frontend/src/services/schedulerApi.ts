@@ -16,6 +16,14 @@ export interface SchedulableResource {
     schedule_id: string | null;
     launch_time: string;
     resource_type?: 'ec2' | 'rds';
+    do_not_schedule?: boolean;
+    estimated_hourly_cost?: number;
+    cost_stop_suggested?: boolean;
+}
+
+export interface ResourcesResponse {
+    resources: SchedulableResource[];
+    message?: string;
 }
 
 export interface HourlyProfile {
@@ -78,6 +86,7 @@ export interface Schedule {
     id: string;
     instance_id: string;
     instance_name: string;
+    instance_ids?: string[];
     schedule_type: string;
     stop_time: string;
     start_time: string;
@@ -88,6 +97,9 @@ export interface Schedule {
     last_action: string | null;
     total_savings: number;
     executions: number;
+    timezone?: string;
+    days_pattern?: string;
+    estimated_hourly_usd?: number | null;
 }
 
 export interface SavingsSummary {
@@ -96,6 +108,8 @@ export interface SavingsSummary {
     estimated_monthly_savings: number;
     estimated_annual_savings: number;
     total_realized_savings: number;
+    /** Subset of total_realized_savings persisted on stop actions (DB). */
+    realized_savings_logged_usd?: number;
     total_executions: number;
     actions_executed: number;
     actions_successful: number;
@@ -112,23 +126,38 @@ export interface ActionResult {
     timestamp: string;
     status: string;
     message: string;
+    estimated_savings_usd?: number | null;
+}
+
+export interface SchedulerSettings {
+    execution_enabled: boolean;
+}
+
+export interface SmartRecommendation {
+    instance_id: string;
+    name: string;
+    reason: string;
+    suggested_stop_time: string;
+    suggested_start_time: string;
+    days_pattern: string;
+    estimated_hourly_cost?: number;
 }
 
 // API Functions
 export const schedulerApi = {
-    // Resources
-    async getResources(): Promise<SchedulableResource[]> {
+    async getResources(): Promise<ResourcesResponse> {
         const response = await api.get('/api/scheduler/resources');
-        return response.data.resources || [];
+        return {
+            resources: response.data.resources || [],
+            message: response.data.message,
+        };
     },
 
-    // Analysis
     async analyzeResource(instanceId: string): Promise<ResourceAnalysis> {
         const response = await api.post(`/api/scheduler/analyze/${instanceId}`);
         return response.data;
     },
 
-    // Schedules
     async getSchedules(): Promise<Schedule[]> {
         const response = await api.get('/api/scheduler/schedules');
         return response.data.schedules || [];
@@ -137,6 +166,21 @@ export const schedulerApi = {
     async createSchedule(data: Partial<Schedule>): Promise<Schedule> {
         const response = await api.post('/api/scheduler/schedules', data);
         return response.data;
+    },
+
+    /** DB + APScheduler production schedule (cron start/stop). */
+    async createProductionSchedule(payload: {
+        instance_ids?: string[];
+        instance_id?: string;
+        start_time: string;
+        stop_time: string;
+        timezone?: string;
+        days_pattern?: 'all' | 'weekdays' | 'weekends';
+        enabled?: boolean;
+        estimated_hourly_usd?: number | null;
+    }): Promise<Schedule> {
+        const response = await api.post('/api/scheduler/create', payload);
+        return response.data.schedule;
     },
 
     async updateSchedule(id: string, data: Partial<Schedule>): Promise<Schedule> {
@@ -148,13 +192,26 @@ export const schedulerApi = {
         await api.delete(`/api/scheduler/schedules/${id}`);
     },
 
-    // Savings
     async getSavings(): Promise<SavingsSummary> {
         const response = await api.get('/api/scheduler/savings');
         return response.data;
     },
 
-    // Actions
+    async getSchedulerSettings(): Promise<SchedulerSettings> {
+        const response = await api.get('/api/scheduler/settings');
+        return response.data;
+    },
+
+    async updateSchedulerSettings(execution_enabled: boolean): Promise<SchedulerSettings> {
+        const response = await api.put('/api/scheduler/settings', { execution_enabled });
+        return response.data;
+    },
+
+    async getSmartRecommendations(): Promise<{ recommendations: SmartRecommendation[] }> {
+        const response = await api.get('/api/scheduler/smart-recommendations');
+        return response.data;
+    },
+
     async executeAction(actionType: string, resourceId: string): Promise<ActionResult> {
         const response = await api.post('/api/scheduler/actions/execute', {
             action_type: actionType,

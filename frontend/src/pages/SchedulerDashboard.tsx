@@ -28,8 +28,11 @@ import {
     Alert,
     TextField,
     FormControlLabel,
-    Checkbox,
     Divider,
+    MenuItem,
+    Select,
+    FormControl,
+    InputLabel,
 } from '@mui/material';
 import {
     Schedule as ScheduleIcon,
@@ -73,6 +76,25 @@ function TabPanel({ children, value, index }: TabPanelProps) {
             {value === index && <Box sx={{ pt: 3 }}>{children}</Box>}
         </div>
     );
+}
+
+function resourceHasSchedule(instanceId: string, schedules: Schedule[]): boolean {
+    return schedules.some(
+        (s) =>
+            s.instance_id === instanceId ||
+            (Array.isArray(s.instance_ids) && s.instance_ids.includes(instanceId))
+    );
+}
+
+function scheduleHintForResource(instanceId: string, schedules: Schedule[]): string | null {
+    const s = schedules.find(
+        (x) =>
+            x.instance_id === instanceId ||
+            (Array.isArray(x.instance_ids) && x.instance_ids.includes(instanceId))
+    );
+    if (!s || !s.enabled) return null;
+    const tz = s.timezone || 'UTC';
+    return `Next cycle: stop ${s.stop_time} · start ${s.start_time} (${tz})`;
 }
 
 // ── Mini sparkline component (pure CSS) ────────────────────
@@ -174,18 +196,22 @@ const SchedulerDashboard: React.FC = () => {
         instance_name: '',
         stop_time: '20:00',
         start_time: '08:00',
-        days: ['mon', 'tue', 'wed', 'thu', 'fri'] as string[],
+        timezone: 'UTC',
+        days_pattern: 'weekdays' as 'all' | 'weekdays' | 'weekends',
         estimated_monthly_savings: 0,
+        estimated_hourly_usd: '' as string | number,
     });
 
     const queryClient = useQueryClient();
 
     // ── Queries ──
-    const { data: resources = [], isLoading: resourcesLoading } = useQuery(
+    const { data: resourcesData, isLoading: resourcesLoading } = useQuery(
         'scheduler-resources',
         schedulerApi.getResources,
         { refetchInterval: 60000 }
     );
+    const resources = resourcesData?.resources ?? [];
+    const resourcesBanner = resourcesData?.message;
 
     const { data: schedules = [], isLoading: schedulesLoading } = useQuery(
         'scheduler-schedules',
@@ -205,12 +231,55 @@ const SchedulerDashboard: React.FC = () => {
         { refetchInterval: 10000 }
     );
 
+    const { data: schedSettings } = useQuery(
+        'scheduler-settings',
+        schedulerApi.getSchedulerSettings,
+        { refetchInterval: 30000 }
+    );
+
+    const { data: smartRecs } = useQuery(
+        'scheduler-smart-recs',
+        schedulerApi.getSmartRecommendations,
+        { refetchInterval: 120000 }
+    );
+
     // ── Mutations ──
+    const toggleSchedulerExecMutation = useMutation(
+        (enabled: boolean) => schedulerApi.updateSchedulerSettings(enabled),
+        {
+            onSuccess: (d) => {
+                toast.success(d.execution_enabled ? 'Scheduler execution enabled (cron will run)' : 'Scheduler execution paused (recommendations only)');
+                queryClient.invalidateQueries('scheduler-settings');
+            },
+            onError: () => { toast.error('Failed to update scheduler settings'); },
+        }
+    );
+
     const createScheduleMutation = useMutation(
-        (data: Partial<Schedule>) => schedulerApi.createSchedule(data),
+        (payload: {
+            instance_id: string;
+            instance_name?: string;
+            start_time: string;
+            stop_time: string;
+            timezone: string;
+            days_pattern: 'all' | 'weekdays' | 'weekends';
+            estimated_hourly_usd?: number;
+        }) =>
+            schedulerApi.createProductionSchedule({
+                instance_id: payload.instance_id,
+                start_time: payload.start_time,
+                stop_time: payload.stop_time,
+                timezone: payload.timezone,
+                days_pattern: payload.days_pattern,
+                enabled: true,
+                estimated_hourly_usd:
+                    payload.estimated_hourly_usd != null && payload.estimated_hourly_usd > 0
+                        ? payload.estimated_hourly_usd
+                        : undefined,
+            }),
         {
             onSuccess: () => {
-                toast.success('Schedule created successfully!');
+                toast.success('Schedule created — APScheduler will start/stop instances on your times.');
                 queryClient.invalidateQueries('scheduler-schedules');
                 queryClient.invalidateQueries('scheduler-savings');
                 setCreateDialogOpen(false);
@@ -253,6 +322,7 @@ const SchedulerDashboard: React.FC = () => {
                 }
                 queryClient.invalidateQueries('scheduler-resources');
                 queryClient.invalidateQueries('action-history');
+                queryClient.invalidateQueries('scheduler-savings');
             },
             onError: () => { toast.error('Action failed'); },
         }
@@ -277,28 +347,58 @@ const SchedulerDashboard: React.FC = () => {
     const handleApplySuggestedSchedule = () => {
         if (!analysisResult?.suggested_schedule || !selectedResource) return;
         const sched = analysisResult.suggested_schedule;
+        const hr =
+            selectedResource.hourly_cost > 0
+                ? selectedResource.hourly_cost
+                : selectedResource.estimated_hourly_cost && selectedResource.estimated_hourly_cost > 0
+                    ? selectedResource.estimated_hourly_cost
+                    : undefined;
         createScheduleMutation.mutate({
             instance_id: selectedResource.instance_id,
             instance_name: selectedResource.name,
-            schedule_type: 'ai_suggested',
-            stop_time: sched.stop_time,
-            start_time: sched.start_time,
-            estimated_monthly_savings: sched.estimated_monthly_savings,
-        } as any);
+            start_time: sched.start_time.length <= 5 ? sched.start_time : sched.start_time.slice(0, 5),
+            stop_time: sched.stop_time.length <= 5 ? sched.stop_time : sched.stop_time.slice(0, 5),
+            timezone: 'UTC',
+            days_pattern: 'weekdays',
+            estimated_hourly_usd: hr,
+        });
         setAnalysisDialogOpen(false);
     };
 
     const handleCreateSchedule = () => {
-        createScheduleMutation.mutate(scheduleForm as any);
+        const raw = scheduleForm.estimated_hourly_usd;
+        const hourly =
+            raw === '' || raw === undefined
+                ? undefined
+                : typeof raw === 'number'
+                    ? raw
+                    : parseFloat(String(raw));
+        createScheduleMutation.mutate({
+            instance_id: scheduleForm.instance_id,
+            instance_name: scheduleForm.instance_name,
+            start_time: scheduleForm.start_time,
+            stop_time: scheduleForm.stop_time,
+            timezone: scheduleForm.timezone,
+            days_pattern: scheduleForm.days_pattern,
+            estimated_hourly_usd:
+                hourly !== undefined && !Number.isNaN(hourly) && hourly > 0 ? hourly : undefined,
+        });
     };
 
     const openCreateDialog = (resource?: SchedulableResource) => {
         if (resource) {
+            const hr =
+                resource.hourly_cost > 0
+                    ? resource.hourly_cost
+                    : resource.estimated_hourly_cost && resource.estimated_hourly_cost > 0
+                        ? resource.estimated_hourly_cost
+                        : '';
             setScheduleForm((prev) => ({
                 ...prev,
                 instance_id: resource.instance_id,
                 instance_name: resource.name,
                 estimated_monthly_savings: Math.round(resource.monthly_cost * 0.4 * 100) / 100,
+                estimated_hourly_usd: hr === '' ? '' : Math.round(hr * 10000) / 10000,
             }));
         }
         setCreateDialogOpen(true);
@@ -317,7 +417,7 @@ const SchedulerDashboard: React.FC = () => {
     return (
         <Box>
             {/* Page Header */}
-            <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <Box sx={{ mb: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 2 }}>
                 <Box>
                     <Typography variant="h4" sx={{ fontWeight: 700 }}>
                         <AIIcon sx={{ mr: 1, verticalAlign: 'bottom', color: '#7c4dff' }} />
@@ -326,6 +426,25 @@ const SchedulerDashboard: React.FC = () => {
                     <Typography variant="body1" color="text.secondary" sx={{ mt: 0.5 }}>
                         AI-powered resource scheduling — analyze usage patterns, auto-schedule start/stop, save money
                     </Typography>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1.5 }}>
+                        <Chip
+                            size="small"
+                            label={schedSettings?.execution_enabled ? 'Execution: ON' : 'Execution: OFF'}
+                            color={schedSettings?.execution_enabled ? 'success' : 'default'}
+                            variant="outlined"
+                        />
+                        <FormControlLabel
+                            control={
+                                <Switch
+                                    checked={!!schedSettings?.execution_enabled}
+                                    onChange={(_, v) => toggleSchedulerExecMutation.mutate(v)}
+                                    disabled={toggleSchedulerExecMutation.isLoading || schedSettings === undefined}
+                                    color="success"
+                                />
+                            }
+                            label="Automated start/stop"
+                        />
+                    </Box>
                 </Box>
                 <Button
                     variant="contained"
@@ -339,6 +458,21 @@ const SchedulerDashboard: React.FC = () => {
                     New Schedule
                 </Button>
             </Box>
+
+            {resourcesBanner && (
+                <Alert severity="warning" sx={{ mb: 2 }}>{resourcesBanner}</Alert>
+            )}
+
+            {smartRecs?.recommendations && smartRecs.recommendations.length > 0 && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                    <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Cost-aware suggestions</Typography>
+                    {smartRecs.recommendations.slice(0, 5).map((r) => (
+                        <Typography key={r.instance_id} variant="body2">
+                            {r.name} ({r.instance_id}): {r.reason}. Suggested stop {r.suggested_stop_time}, start {r.suggested_start_time} ({r.days_pattern}).
+                        </Typography>
+                    ))}
+                </Alert>
+            )}
 
             {/* Summary Cards */}
             <Grid container spacing={3} sx={{ mb: 4 }}>
@@ -385,11 +519,15 @@ const SchedulerDashboard: React.FC = () => {
                         <CardContent>
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                 <Box>
-                                    <Typography variant="caption" color="text.secondary">Resources Managed</Typography>
-                                    <Typography variant="h4" sx={{ fontWeight: 700 }}>
-                                        {resources.length}
+                                    <Typography variant="caption" color="text.secondary">Realized (logged)</Typography>
+                                    <Typography variant="h4" sx={{ fontWeight: 700, color: '#ffcc80' }}>
+                                        {formatCurrency(
+                                            savings?.realized_savings_logged_usd ?? savings?.total_realized_savings ?? 0
+                                        )}
                                     </Typography>
-                                    <Typography variant="body2" color="text.secondary">EC2 instances</Typography>
+                                    <Typography variant="body2" color="text.secondary">
+                                        Est. $ from successful stops · {resources.length} EC2 in list
+                                    </Typography>
                                 </Box>
                                 <CloudIcon sx={{ fontSize: 48, color: 'rgba(255,183,77,0.3)' }} />
                             </Box>
@@ -475,11 +613,19 @@ const SchedulerDashboard: React.FC = () => {
                                             <Chip label={r.instance_type} size="small" variant="outlined" />
                                         </TableCell>
                                         <TableCell>
-                                            <Chip
-                                                label={r.state}
-                                                size="small"
-                                                color={r.state === 'running' || r.state === 'available' ? 'success' : r.state === 'stopped' ? 'default' : 'warning'}
-                                            />
+                                            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5, alignItems: 'center' }}>
+                                                <Chip
+                                                    label={r.state === 'running' ? 'Running' : r.state === 'stopped' ? 'Stopped' : r.state}
+                                                    size="small"
+                                                    color={r.state === 'running' || r.state === 'available' ? 'success' : r.state === 'stopped' ? 'default' : 'warning'}
+                                                />
+                                                {r.resource_type === 'ec2' && r.do_not_schedule && (
+                                                    <Chip label="No schedule" size="small" variant="outlined" color="warning" />
+                                                )}
+                                                {r.resource_type === 'ec2' && r.cost_stop_suggested && (
+                                                    <Chip label="High $ / idle" size="small" sx={{ bgcolor: 'rgba(255,152,0,0.2)', color: '#ff9800' }} />
+                                                )}
+                                            </Box>
                                         </TableCell>
                                         <TableCell>
                                             <Typography variant="body2">{r.az}</Typography>
@@ -507,11 +653,18 @@ const SchedulerDashboard: React.FC = () => {
                                             </Typography>
                                         </TableCell>
                                         <TableCell align="center">
-                                            {r.schedule_id ? (
-                                                <Chip label="Scheduled" size="small" color="primary" icon={<ScheduleIcon />} />
-                                            ) : (
-                                                <Chip label="None" size="small" variant="outlined" />
-                                            )}
+                                            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+                                                {resourceHasSchedule(r.instance_id, schedules) || r.schedule_id ? (
+                                                    <Chip label="Scheduled" size="small" color="primary" icon={<ScheduleIcon />} />
+                                                ) : (
+                                                    <Chip label="None" size="small" variant="outlined" />
+                                                )}
+                                                {scheduleHintForResource(r.instance_id, schedules) && (
+                                                    <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', maxWidth: 160 }}>
+                                                        {scheduleHintForResource(r.instance_id, schedules)}
+                                                    </Typography>
+                                                )}
+                                            </Box>
                                         </TableCell>
                                         <TableCell align="center">
                                             <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
@@ -593,17 +746,43 @@ const SchedulerDashboard: React.FC = () => {
                                         <TableCell>
                                             <Typography variant="body2" sx={{ fontWeight: 600 }}>{s.instance_name}</Typography>
                                             <Typography variant="caption" color="text.secondary">{s.instance_id}</Typography>
+                                            {s.instance_ids && s.instance_ids.length > 1 && (
+                                                <Typography variant="caption" display="block" color="text.secondary">
+                                                    +{s.instance_ids.length - 1} more instance(s)
+                                                </Typography>
+                                            )}
+                                            {s.timezone && (
+                                                <Typography variant="caption" display="block" color="text.secondary">TZ: {s.timezone}</Typography>
+                                            )}
                                         </TableCell>
                                         <TableCell>
                                             <Chip
-                                                label={s.schedule_type === 'ai_suggested' ? 'AI' : 'Manual'}
+                                                label={
+                                                    s.schedule_type === 'production'
+                                                        ? 'Cron (DB)'
+                                                        : s.schedule_type === 'ai_suggested'
+                                                            ? 'AI'
+                                                            : 'Manual'
+                                                }
                                                 size="small"
-                                                icon={s.schedule_type === 'ai_suggested' ? <AIIcon /> : <ScheduleIcon />}
+                                                icon={
+                                                    s.schedule_type === 'ai_suggested'
+                                                        ? <AIIcon />
+                                                        : <ScheduleIcon />
+                                                }
                                                 sx={{
-                                                    bgcolor: s.schedule_type === 'ai_suggested'
-                                                        ? 'rgba(124,77,255,0.2)'
-                                                        : 'rgba(255,255,255,0.1)',
-                                                    color: s.schedule_type === 'ai_suggested' ? '#b388ff' : 'text.primary',
+                                                    bgcolor:
+                                                        s.schedule_type === 'production'
+                                                            ? 'rgba(33,150,243,0.2)'
+                                                            : s.schedule_type === 'ai_suggested'
+                                                                ? 'rgba(124,77,255,0.2)'
+                                                                : 'rgba(255,255,255,0.1)',
+                                                    color:
+                                                        s.schedule_type === 'production'
+                                                            ? '#64b5f6'
+                                                            : s.schedule_type === 'ai_suggested'
+                                                                ? '#b388ff'
+                                                                : 'text.primary',
                                                 }}
                                             />
                                         </TableCell>
@@ -696,6 +875,7 @@ const SchedulerDashboard: React.FC = () => {
                                     <TableCell>Resource</TableCell>
                                     <TableCell>Action</TableCell>
                                     <TableCell>Status</TableCell>
+                                    <TableCell align="right">Est. savings</TableCell>
                                     <TableCell>Message</TableCell>
                                 </TableRow>
                             </TableHead>
@@ -728,8 +908,23 @@ const SchedulerDashboard: React.FC = () => {
                                                 icon={h.status === 'success' ? <SuccessIcon /> : <ErrorIcon />}
                                             />
                                         </TableCell>
+                                        <TableCell align="right">
+                                            {h.estimated_savings_usd != null && h.estimated_savings_usd > 0 ? (
+                                                <Typography variant="body2" sx={{ fontFamily: 'monospace', color: '#69f0ae' }}>
+                                                    {formatCurrency(h.estimated_savings_usd)}
+                                                </Typography>
+                                            ) : (
+                                                <Typography variant="caption" color="text.secondary">—</Typography>
+                                            )}
+                                        </TableCell>
                                         <TableCell>
-                                            <Typography variant="body2" color="text.secondary">{h.message}</Typography>
+                                            <Typography variant="body2" color="text.secondary">
+                                                {(() => {
+                                                    const rid = h.resource_id || h.instance_id || '';
+                                                    const ts = h.timestamp ? new Date(h.timestamp).toLocaleString() : '';
+                                                    return `${h.action} ${rid} at ${ts} — ${h.status}${h.message ? ` (${h.message})` : ''}`;
+                                                })()}
+                                            </Typography>
                                         </TableCell>
                                     </TableRow>
                                 ))}
@@ -976,33 +1171,50 @@ const SchedulerDashboard: React.FC = () => {
                                 InputLabelProps={{ shrink: true }}
                             />
                         </Grid>
-                    </Grid>
-                    <Box sx={{ mt: 2 }}>
-                        <Typography variant="subtitle2" gutterBottom>Active Days</Typography>
-                        <Box sx={{ display: 'flex', gap: 1 }}>
-                            {['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((d) => (
-                                <FormControlLabel
-                                    key={d}
-                                    control={
-                                        <Checkbox
-                                            checked={scheduleForm.days.includes(d)}
-                                            size="small"
-                                            onChange={(e) => {
-                                                setScheduleForm((prev) => ({
-                                                    ...prev,
-                                                    days: e.target.checked
-                                                        ? [...prev.days, d]
-                                                        : prev.days.filter((x) => x !== d),
-                                                }));
-                                            }}
-                                        />
+                        <Grid item xs={12}>
+                            <TextField
+                                label="Timezone (IANA)"
+                                fullWidth
+                                placeholder="UTC, Asia/Kolkata, America/New_York"
+                                value={scheduleForm.timezone}
+                                onChange={(e) => setScheduleForm({ ...scheduleForm, timezone: e.target.value })}
+                                helperText="Cron jobs run in this timezone"
+                            />
+                        </Grid>
+                        <Grid item xs={12}>
+                            <FormControl fullWidth>
+                                <InputLabel id="days-pattern-label">Schedule pattern</InputLabel>
+                                <Select
+                                    labelId="days-pattern-label"
+                                    label="Schedule pattern"
+                                    value={scheduleForm.days_pattern}
+                                    onChange={(e) =>
+                                        setScheduleForm({
+                                            ...scheduleForm,
+                                            days_pattern: e.target.value as 'all' | 'weekdays' | 'weekends',
+                                        })
                                     }
-                                    label={d.charAt(0).toUpperCase() + d.slice(1)}
-                                    sx={{ mr: 0 }}
-                                />
-                            ))}
-                        </Box>
-                    </Box>
+                                >
+                                    <MenuItem value="all">Every day</MenuItem>
+                                    <MenuItem value="weekdays">Weekdays (Mon–Fri)</MenuItem>
+                                    <MenuItem value="weekends">Weekends (Sat–Sun)</MenuItem>
+                                </Select>
+                            </FormControl>
+                        </Grid>
+                        <Grid item xs={12}>
+                            <TextField
+                                label="Est. hourly cost (USD, optional)"
+                                fullWidth
+                                type="number"
+                                inputProps={{ min: 0, step: 0.0001 }}
+                                value={scheduleForm.estimated_hourly_usd}
+                                onChange={(e) =>
+                                    setScheduleForm({ ...scheduleForm, estimated_hourly_usd: e.target.value })
+                                }
+                                helperText="Used to estimate savings per stop; defaults on the server if empty"
+                            />
+                        </Grid>
+                    </Grid>
                 </DialogContent>
                 <DialogActions sx={{ px: 3, pb: 2 }}>
                     <Button onClick={() => setCreateDialogOpen(false)}>Cancel</Button>

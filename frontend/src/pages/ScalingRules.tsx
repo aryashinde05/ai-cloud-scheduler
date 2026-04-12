@@ -50,8 +50,7 @@ import {
     History as HistoryIcon,
     Speed as SpeedIcon,
     Rule as RuleIcon,
-    ExpandMore as ExpandIcon,
-    Edit as EditIcon,
+    Groups as GroupsIcon,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import toast from 'react-hot-toast';
@@ -62,6 +61,11 @@ import {
     RuleExecution,
     ScalingStats,
 } from '../services/scalingRulesApi';
+import {
+    autoscalingAsgApi,
+    AsgScalingRuleCreate,
+    AsgScalingRuleRow,
+} from '../services/autoscalingAsgApi';
 
 // ── Tab Panel ────────────────────────────────────────
 interface TabPanelProps {
@@ -180,6 +184,15 @@ const ScalingRules: React.FC = () => {
 
     const [resourceIdsInput, setResourceIdsInput] = useState('');
 
+    const [asgForm, setAsgForm] = useState({
+        asg_name: '',
+        min_size: 1,
+        max_size: 4,
+        scale_up_cpu: 70,
+        scale_down_cpu: 20,
+        region: '',
+    });
+
     // ── Queries ──
     const { data: rules = [], isLoading: rulesLoading } = useQuery<ScalingRule[]>(
         'scaling-rules',
@@ -198,6 +211,13 @@ const ScalingRules: React.FC = () => {
         scalingRulesApi.getAllExecutions,
         { refetchInterval: 10000 }
     );
+
+    const { data: asgListData, isLoading: asgListLoading } = useQuery(
+        'asg-scaling-rules',
+        () => autoscalingAsgApi.listRules(),
+        { refetchInterval: 30000 }
+    );
+    const asgRules: AsgScalingRuleRow[] = asgListData?.rules ?? [];
 
     // ── Mutations ──
     const createMutation = useMutation(
@@ -260,6 +280,40 @@ const ScalingRules: React.FC = () => {
         }
     );
 
+    const asgCreateMutation = useMutation(
+        (payload: AsgScalingRuleCreate) => autoscalingAsgApi.createRule(payload),
+        {
+            onSuccess: () => {
+                toast.success('ASG rule created — min/max updated; CPU alarms and scaling policies added in AWS');
+                queryClient.invalidateQueries('asg-scaling-rules');
+                setAsgForm((p) => ({ ...p, asg_name: '' }));
+            },
+            onError: () => { toast.error('Failed to create ASG rule'); },
+        }
+    );
+
+    const asgDeleteMutation = useMutation(
+        (publicId: string) => autoscalingAsgApi.deleteRule(publicId),
+        {
+            onSuccess: () => {
+                toast.success('ASG rule removed (alarms/policies cleaned up where possible)');
+                queryClient.invalidateQueries('asg-scaling-rules');
+            },
+            onError: () => { toast.error('Failed to delete ASG rule'); },
+        }
+    );
+
+    const asgApplyMutation = useMutation(
+        (publicId: string) => autoscalingAsgApi.applyRule(publicId),
+        {
+            onSuccess: () => {
+                toast.success('Min/max re-applied to Auto Scaling group');
+                queryClient.invalidateQueries('asg-scaling-rules');
+            },
+            onError: () => { toast.error('Failed to apply ASG rule'); },
+        }
+    );
+
     // ── Handlers ──
     const applyTemplate = (idx: number) => {
         setSelectedTemplate(idx);
@@ -305,6 +359,33 @@ const ScalingRules: React.FC = () => {
         return symbols[op] || op;
     };
 
+    const handleAsgCreate = () => {
+        const name = asgForm.asg_name.trim();
+        if (!name) {
+            toast.error('Auto Scaling group name is required');
+            return;
+        }
+        if (asgForm.min_size > asgForm.max_size) {
+            toast.error('Min size cannot exceed max size');
+            return;
+        }
+        if (asgForm.scale_down_cpu >= asgForm.scale_up_cpu) {
+            toast.error('Scale-down CPU must be less than scale-up CPU');
+            return;
+        }
+        const payload: AsgScalingRuleCreate = {
+            asg_name: name,
+            min_size: asgForm.min_size,
+            max_size: asgForm.max_size,
+            scale_up_cpu: asgForm.scale_up_cpu,
+            scale_down_cpu: asgForm.scale_down_cpu,
+        };
+        if (asgForm.region.trim()) {
+            payload.region = asgForm.region.trim();
+        }
+        asgCreateMutation.mutate(payload);
+    };
+
     // ═══════════════════════════════════════════════════
     // Render
     // ═══════════════════════════════════════════════════
@@ -329,6 +410,7 @@ const ScalingRules: React.FC = () => {
                             queryClient.invalidateQueries('scaling-rules');
                             queryClient.invalidateQueries('scaling-rules-stats');
                             queryClient.invalidateQueries('scaling-rules-executions');
+                            queryClient.invalidateQueries('asg-scaling-rules');
                         }}
                     >
                         Refresh
@@ -448,6 +530,7 @@ const ScalingRules: React.FC = () => {
             >
                 <Tab icon={<RuleIcon />} iconPosition="start" label="Rules" />
                 <Tab icon={<HistoryIcon />} iconPosition="start" label="Execution History" />
+                <Tab icon={<GroupsIcon />} iconPosition="start" label="ASG (AWS)" />
             </Tabs>
 
             {/* ── Tab 0: Rules ─────────────────────────────────── */}
@@ -641,6 +724,186 @@ const ScalingRules: React.FC = () => {
                                                 ? `${exec.execution_duration_ms}ms`
                                                 : '—'
                                             }
+                                        </TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </TableContainer>
+                )}
+            </TabPanel>
+
+            {/* ── Tab 2: ASG CPU scaling (boto3 + CloudWatch) ─── */}
+            <TabPanel value={tabValue} index={2}>
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                    This updates the real ASG min/max in AWS, creates SimpleScaling policies, and CloudWatch CPU alarms.
+                    Scale-up runs when average CPU is above the high threshold; scale-in when below the low threshold.
+                </Alert>
+                <Card sx={{ mb: 3, background: 'rgba(76,175,80,0.08)', border: '1px solid rgba(76,175,80,0.25)' }}>
+                    <CardContent>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 600, mb: 2 }}>
+                            New ASG CPU rule
+                        </Typography>
+                        <Grid container spacing={2}>
+                            <Grid item xs={12} md={4}>
+                                <TextField
+                                    fullWidth
+                                    size="small"
+                                    label="Auto Scaling group name"
+                                    value={asgForm.asg_name}
+                                    onChange={(e) => setAsgForm((p) => ({ ...p, asg_name: e.target.value }))}
+                                    placeholder="e.g. my-app-asg"
+                                    required
+                                />
+                            </Grid>
+                            <Grid item xs={6} md={2}>
+                                <TextField
+                                    fullWidth
+                                    size="small"
+                                    label="Min size"
+                                    type="number"
+                                    inputProps={{ min: 0 }}
+                                    value={asgForm.min_size}
+                                    onChange={(e) =>
+                                        setAsgForm((p) => ({ ...p, min_size: Number(e.target.value) || 0 }))
+                                    }
+                                />
+                            </Grid>
+                            <Grid item xs={6} md={2}>
+                                <TextField
+                                    fullWidth
+                                    size="small"
+                                    label="Max size"
+                                    type="number"
+                                    inputProps={{ min: 1 }}
+                                    value={asgForm.max_size}
+                                    onChange={(e) =>
+                                        setAsgForm((p) => ({ ...p, max_size: Math.max(1, Number(e.target.value) || 1) }))
+                                    }
+                                />
+                            </Grid>
+                            <Grid item xs={6} md={2}>
+                                <TextField
+                                    fullWidth
+                                    size="small"
+                                    label="Scale out CPU %"
+                                    type="number"
+                                    inputProps={{ min: 1, max: 99 }}
+                                    value={asgForm.scale_up_cpu}
+                                    onChange={(e) =>
+                                        setAsgForm((p) => ({ ...p, scale_up_cpu: Number(e.target.value) || 70 }))
+                                    }
+                                    helperText="Alarm high"
+                                />
+                            </Grid>
+                            <Grid item xs={6} md={2}>
+                                <TextField
+                                    fullWidth
+                                    size="small"
+                                    label="Scale in CPU %"
+                                    type="number"
+                                    inputProps={{ min: 1, max: 99 }}
+                                    value={asgForm.scale_down_cpu}
+                                    onChange={(e) =>
+                                        setAsgForm((p) => ({ ...p, scale_down_cpu: Number(e.target.value) || 20 }))
+                                    }
+                                    helperText="Alarm low"
+                                />
+                            </Grid>
+                            <Grid item xs={12} md={4}>
+                                <TextField
+                                    fullWidth
+                                    size="small"
+                                    label="Region (optional)"
+                                    value={asgForm.region}
+                                    onChange={(e) => setAsgForm((p) => ({ ...p, region: e.target.value }))}
+                                    placeholder="Default: env / connected account"
+                                />
+                            </Grid>
+                            <Grid item xs={12}>
+                                <Button
+                                    variant="contained"
+                                    color="success"
+                                    startIcon={<AddIcon />}
+                                    onClick={handleAsgCreate}
+                                    disabled={asgCreateMutation.isLoading || !asgForm.asg_name.trim()}
+                                >
+                                    {asgCreateMutation.isLoading ? 'Creating…' : 'Create ASG rule'}
+                                </Button>
+                            </Grid>
+                        </Grid>
+                    </CardContent>
+                </Card>
+                {asgListLoading ? (
+                    <Box sx={{ textAlign: 'center', py: 4 }}>
+                        <CircularProgress />
+                    </Box>
+                ) : asgRules.length === 0 ? (
+                    <Alert severity="info">No ASG rules stored yet. Create one above to track policies created from this app.</Alert>
+                ) : (
+                    <TableContainer component={Paper} sx={{ background: 'transparent' }}>
+                        <Table>
+                            <TableHead>
+                                <TableRow>
+                                    <TableCell>ASG</TableCell>
+                                    <TableCell>Region</TableCell>
+                                    <TableCell align="center">Min / Max</TableCell>
+                                    <TableCell align="center">CPU thresholds</TableCell>
+                                    <TableCell>Alarms</TableCell>
+                                    <TableCell align="center">Actions</TableCell>
+                                </TableRow>
+                            </TableHead>
+                            <TableBody>
+                                {asgRules.map((r) => (
+                                    <TableRow key={r.public_id} hover>
+                                        <TableCell>
+                                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                                                {r.asg_name}
+                                            </Typography>
+                                            <Typography variant="caption" color="text.secondary" sx={{ fontFamily: 'monospace' }}>
+                                                {r.public_id.slice(0, 8)}…
+                                            </Typography>
+                                        </TableCell>
+                                        <TableCell>{r.region}</TableCell>
+                                        <TableCell align="center">
+                                            {r.min_size} / {r.max_size}
+                                        </TableCell>
+                                        <TableCell align="center">
+                                            <Typography variant="body2">
+                                                out &gt; {r.scale_up_cpu}% · in &lt; {r.scale_down_cpu}%
+                                            </Typography>
+                                        </TableCell>
+                                        <TableCell>
+                                            <Typography variant="caption" display="block" color="text.secondary">
+                                                {r.alarm_high_name || '—'}
+                                            </Typography>
+                                            <Typography variant="caption" display="block" color="text.secondary">
+                                                {r.alarm_low_name || '—'}
+                                            </Typography>
+                                        </TableCell>
+                                        <TableCell align="center">
+                                            <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'center' }}>
+                                                <Tooltip title="Re-apply saved min/max to the ASG">
+                                                    <IconButton
+                                                        size="small"
+                                                        color="primary"
+                                                        onClick={() => asgApplyMutation.mutate(r.public_id)}
+                                                        disabled={asgApplyMutation.isLoading}
+                                                    >
+                                                        <RunIcon />
+                                                    </IconButton>
+                                                </Tooltip>
+                                                <Tooltip title="Delete rule and remove alarms/policies">
+                                                    <IconButton
+                                                        size="small"
+                                                        color="error"
+                                                        onClick={() => asgDeleteMutation.mutate(r.public_id)}
+                                                        disabled={asgDeleteMutation.isLoading}
+                                                    >
+                                                        <DeleteIcon />
+                                                    </IconButton>
+                                                </Tooltip>
+                                            </Box>
                                         </TableCell>
                                     </TableRow>
                                 ))}

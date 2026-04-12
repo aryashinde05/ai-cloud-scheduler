@@ -41,9 +41,12 @@ from app.api.onboarding import router as onboarding_router
 from app.api.scheduler_endpoints import router as scheduler_router
 from app.api.scaling_rules_endpoints import router as scaling_rules_router
 from app.api.aws_simple_endpoints import router as aws_simple_router
+from app.api.optimize_endpoints import router as optimize_router
+from app.api.autoscaling_asg_endpoints import router as autoscaling_asg_router
 from app.api.budgets_endpoints import router as budgets_router
 from app.api.compliance_endpoints import router as compliance_router
 from app.api.reports_endpoints import router as reports_router
+from app.api.cost_explorer_endpoints import router as cost_explorer_router
 from app.api.automation_stats_endpoints import router as automation_stats_router
 
 # Optional routers (some repos/branches omit these modules)
@@ -105,6 +108,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("Failed to initialize SQLAlchemy tables", error=str(e))
 
+    try:
+        from app.services.schedule_job_manager import start_scheduler
+        start_scheduler()
+        logger.info("EC2 schedule job runner (APScheduler) started")
+    except Exception as e:
+        logger.error("Failed to start APScheduler", error=str(e))
+
     # Initialize Supabase connection
     await initialize_database()
     
@@ -112,6 +122,12 @@ async def lifespan(app: FastAPI):
     
     # Shutdown
     logger.info("Shutting down FinOps Platform API")
+
+    try:
+        from app.services.schedule_job_manager import shutdown_scheduler
+        shutdown_scheduler()
+    except Exception as e:
+        logger.warning("APScheduler shutdown error", error=str(e))
 
     try:
         from app.services.webhook_integration import stop_webhook_system
@@ -238,6 +254,7 @@ app.include_router(aws_simple_router)
 app.include_router(budgets_router)
 app.include_router(compliance_router)
 app.include_router(reports_router)
+app.include_router(cost_explorer_router, prefix="/api")
 app.include_router(automation_stats_router)
 app.include_router(aws_cost_router)
 app.include_router(azure_cost_router)
@@ -248,6 +265,8 @@ app.include_router(multi_cloud_router, prefix="/api/v1")
 app.include_router(onboarding_router, prefix="/api/v1")
 app.include_router(scheduler_router, prefix="/api")
 app.include_router(scaling_rules_router, prefix="/api/v1")
+app.include_router(optimize_router)
+app.include_router(autoscaling_asg_router)
 app.include_router(resources_router)
 app.include_router(ai_assistant_router)
 

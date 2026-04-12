@@ -7,6 +7,8 @@ import {
   Grid,
   Button,
   Chip,
+  Switch,
+  FormControlLabel,
   Table,
   TableBody,
   TableCell,
@@ -55,6 +57,7 @@ import {
 } from 'recharts';
 import numeral from 'numeral';
 import { useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import { SkeletonLoader } from '../components/Loading';
 import { api } from '../services/api';
 import {
@@ -71,6 +74,10 @@ const Optimization: React.FC = () => {
   const [selectedTab, setSelectedTab] = useState(0);
   const [implementDialogOpen, setImplementDialogOpen] = useState(false);
   const [selectedRecommendation, setSelectedRecommendation] = useState<any>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [implementing, setImplementing] = useState(false);
+  const [autoModeEnabled, setAutoModeEnabled] = useState<boolean>(false);
+  const [autoModeLoading, setAutoModeLoading] = useState<boolean>(true);
   const [loading, setLoading] = useState(true);
   const [noAws, setNoAws] = useState(false);
   const [optimizationOpportunities, setOptimizationOpportunities] = useState<any[]>([]);
@@ -78,8 +85,40 @@ const Optimization: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    loadAutoMode();
     loadOptimizationData();
   }, []);
+
+  const loadAutoMode = async () => {
+    try {
+      setAutoModeLoading(true);
+      const res = await api.get('/optimize/auto-mode');
+      setAutoModeEnabled(!!res.data?.enabled);
+    } catch (e) {
+      console.error('Error loading auto mode:', e);
+    } finally {
+      setAutoModeLoading(false);
+    }
+  };
+
+  const toggleAutoMode = async (enabled: boolean) => {
+    try {
+      setAutoModeLoading(true);
+      const res = await api.put('/optimize/auto-mode', { enabled });
+      setAutoModeEnabled(!!res.data?.enabled);
+      toast.success(res.data?.enabled ? 'Auto mode enabled' : 'Auto mode disabled');
+    } catch (e) {
+      console.error('Error updating auto mode:', e);
+      const msg =
+        (e as any)?.response?.data?.error?.message ||
+        (e as any)?.response?.data?.detail ||
+        (e as any)?.message ||
+        'Failed to update auto mode';
+      toast.error(msg);
+    } finally {
+      setAutoModeLoading(false);
+    }
+  };
 
   const loadOptimizationData = async () => {
     try {
@@ -181,15 +220,58 @@ const Optimization: React.FC = () => {
 
   const handleImplement = (recommendation: any) => {
     setSelectedRecommendation(recommendation);
+    setConfirmDelete(false);
     setImplementDialogOpen(true);
+  };
+
+  const mapResourceType = (rec: any): 'ec2_instance' | 'ebs_volume' | null => {
+    const rt = (rec?.resourceType || '').toLowerCase();
+    if (rt.includes('ec2')) return 'ec2_instance';
+    if (rt.includes('ebs')) return 'ebs_volume';
+    return null;
   };
 
   const confirmImplementation = async () => {
     if (selectedRecommendation) {
       try {
-        await api.post(`/api/v1/automation/actions/execute`, { action_ids: [selectedRecommendation.resource] });
+        const resourceType = mapResourceType(selectedRecommendation);
+        if (!resourceType) {
+          toast.error('Unsupported resource type for execution');
+          return;
+        }
+
+        setImplementing(true);
+        const res = await api.post(`/optimize/execute`, {
+          resource_id: selectedRecommendation.resource,
+          resource_type: resourceType,
+          confirm_delete: resourceType === 'ebs_volume' ? confirmDelete : false,
+        });
+
+        if (res.data?.status === 'success') {
+          const actions: string[] = Array.isArray(res.data?.actions) ? res.data.actions : [];
+          if (actions.includes('stopped EC2')) {
+            toast.success('Instance stopped successfully');
+          } else if (actions.includes('deleted volume')) {
+            toast.success('Volume deleted successfully');
+          } else if (actions.includes('skipped EC2 (DoNotStop=true)')) {
+            toast.success('Instance skipped (DoNotStop tag)');
+          } else {
+            toast.success('Action executed successfully');
+          }
+          await loadOptimizationData();
+        } else {
+          toast.error('Failed to execute optimization action');
+        }
       } catch (e) {
         console.error('Error executing action:', e);
+        const msg =
+          (e as any)?.response?.data?.error?.message ||
+          (e as any)?.response?.data?.detail ||
+          (e as any)?.message ||
+          'Error executing action';
+        toast.error(msg);
+      } finally {
+        setImplementing(false);
       }
     }
     setImplementDialogOpen(false);
@@ -238,7 +320,20 @@ const Optimization: React.FC = () => {
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ mb: 4, fontWeight: 700 }}>Cost Optimization</Typography>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
+        <Typography variant="h4" sx={{ fontWeight: 700 }}>Cost Optimization</Typography>
+        <FormControlLabel
+          control={
+            <Switch
+              checked={autoModeEnabled}
+              onChange={(e) => toggleAutoMode(e.target.checked)}
+              disabled={autoModeLoading}
+              color="success"
+            />
+          }
+          label={autoModeEnabled ? 'Auto mode ON' : 'Auto mode OFF'}
+        />
+      </Box>
 
       {/* Optimization Overview Cards */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
@@ -427,10 +522,20 @@ const Optimization: React.FC = () => {
         <DialogContent>
           {selectedRecommendation && (
             <Box>
+              {!autoModeEnabled && (
+                <Alert severity="warning" sx={{ mb: 3 }}>
+                  Auto mode is OFF. Turn it ON to allow real AWS execution. You can still review recommendations safely.
+                </Alert>
+              )}
               <Alert severity="info" sx={{ mb: 3 }}>
                 You are about to implement an optimization that will save approximately{' '}
                 <strong>{numeral(selectedRecommendation.monthlySavings).format('$0,0')}</strong> per month.
               </Alert>
+              {mapResourceType(selectedRecommendation) === 'ebs_volume' && (
+                <Alert severity="warning" sx={{ mb: 3 }}>
+                  Deleting an EBS volume is permanent. Please confirm before continuing.
+                </Alert>
+              )}
               <Grid container spacing={2}>
                 <Grid item xs={12} md={6}>
                   <Typography variant="subtitle2" sx={{ mb: 1 }}>Current Configuration:</Typography>
@@ -447,13 +552,40 @@ const Optimization: React.FC = () => {
                   <Typography variant="body2" sx={{ mb: 1 }}>• Confidence Level: {selectedRecommendation.confidence}%</Typography>
                   <Typography variant="body2">• Risk Level: {selectedRecommendation.riskLevel}</Typography>
                 </Grid>
+                {mapResourceType(selectedRecommendation) === 'ebs_volume' && (
+                  <Grid item xs={12}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                      <input
+                        id="confirm-delete"
+                        type="checkbox"
+                        checked={confirmDelete}
+                        onChange={(e) => setConfirmDelete(e.target.checked)}
+                        style={{ transform: 'scale(1.1)' }}
+                      />
+                      <label htmlFor="confirm-delete">
+                        I understand this will permanently delete the EBS volume.
+                      </label>
+                    </Box>
+                  </Grid>
+                )}
               </Grid>
             </Box>
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setImplementDialogOpen(false)}>Cancel</Button>
-          <Button onClick={confirmImplementation} variant="contained" color="primary">Implement Now</Button>
+          <Button onClick={() => setImplementDialogOpen(false)} disabled={implementing}>Cancel</Button>
+          <Button
+            onClick={confirmImplementation}
+            variant="contained"
+            color="primary"
+            disabled={
+              implementing ||
+              !autoModeEnabled ||
+              (selectedRecommendation && mapResourceType(selectedRecommendation) === 'ebs_volume' && !confirmDelete)
+            }
+          >
+            Implement Now
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>
