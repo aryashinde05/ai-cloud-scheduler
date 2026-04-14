@@ -83,6 +83,7 @@
   },
   "devDependencies": {
     "@types/react-virtualized-auto-sizer": "^1.0.1",
+    "baseline-browser-mapping": "^2.10.18",
     "eslint": "^8.40.0",
     "eslint-config-prettier": "^8.8.0",
     "eslint-plugin-prettier": "^4.2.1",
